@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from src.api.routes.chat import router as chat_router
+from src.api.routes.models import router as models_router
 from src.config import get_settings
 
 
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(chat_router)
+    app.include_router(models_router)
     return app
 
 

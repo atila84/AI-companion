@@ -1,39 +1,32 @@
 """FastAPI dependency wiring.
 
-Centralizing construction here (rather than instantiating providers/services
-inline in route handlers) is also what makes `test_chat_endpoint.py` able to
-swap in a fake provider via `app.dependency_overrides[get_provider]` without
-touching the route or service code.
+Centralizing construction here (rather than instantiating services inline in
+route handlers) is also what makes `test_chat_endpoint.py` able to swap in a
+fake `ProviderResolver` via `app.dependency_overrides[get_provider_resolver]`
+without touching the route or service code.
 """
 
-from functools import lru_cache
-
-import anthropic
 from fastapi import Depends
 
 from src.config import Settings, get_settings
 from src.services.chat_service import ChatService
-from src.services.providers.base import CompanionModelProvider, ProviderConfig
-from src.services.providers.claude_provider import ClaudeProvider
+from src.services.provider_router import ProviderResolver
+from src.services.safety.uncensored_guard import UncensoredSafetyGuard
 
 
-@lru_cache
-def get_anthropic_client() -> anthropic.AsyncAnthropic:
-    """Return a process-wide `AsyncAnthropic` client, built from settings."""
-    settings = get_settings()
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+def get_provider_resolver(settings: Settings = Depends(get_settings)) -> ProviderResolver:
+    """Return a `ProviderResolver` wired to the active settings/catalog."""
+    return ProviderResolver(settings)
 
 
-def get_provider(
-    client: anthropic.AsyncAnthropic = Depends(get_anthropic_client),
-) -> CompanionModelProvider:
-    """Return the active `CompanionModelProvider` implementation."""
-    return ClaudeProvider(client)
+def get_safety_guard() -> UncensoredSafetyGuard:
+    """Return the `UncensoredSafetyGuard` applied to uncensored providers."""
+    return UncensoredSafetyGuard()
 
 
 def get_chat_service(
-    provider: CompanionModelProvider = Depends(get_provider),
-    settings: Settings = Depends(get_settings),
+    resolver: ProviderResolver = Depends(get_provider_resolver),
+    safety_guard: UncensoredSafetyGuard = Depends(get_safety_guard),
 ) -> ChatService:
-    """Return a `ChatService` wired to the active provider and model settings."""
-    return ChatService(provider, ProviderConfig(model=settings.claude_model))
+    """Return a `ChatService` wired to provider resolution and the safety guard."""
+    return ChatService(resolver, safety_guard)

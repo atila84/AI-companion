@@ -1,51 +1,63 @@
-"""Orchestrates persona wrapping and provider streaming for one chat turn."""
+"""Orchestrates persona wrapping, provider resolution, and streaming for one chat turn."""
 
 from collections.abc import AsyncIterator
 
 from src.models.chat import ChatRequest, StreamChunk, StreamChunkType
 from src.personas.base import PersonaConfig
-from src.services.providers.base import CompanionModelProvider, ProviderConfig
+from src.services.provider_router import ProviderResolver
 from src.services.providers.exceptions import ProviderError
+from src.services.safety.exceptions import SafetyInterventionError
+from src.services.safety.uncensored_guard import UncensoredSafetyGuard
 from src.utils.sse import format_sse
 
 
 class ChatService:
     """Turns a `ChatRequest` into a stream of SSE-framed `StreamChunk`s."""
 
-    def __init__(self, provider: CompanionModelProvider, provider_config: ProviderConfig) -> None:
+    def __init__(self, resolver: ProviderResolver, safety_guard: UncensoredSafetyGuard) -> None:
         """Initialize the service.
 
         Args:
-            provider: The LLM backend to generate replies with.
-            provider_config: Model/generation settings passed to the provider
-                on every request.
+            resolver: Resolves each request to a provider, generation config,
+                and whether that provider is uncensored.
+            safety_guard: Independent safety check applied only when the
+                resolved provider is uncensored (see SPEC.md §5).
         """
-        self._provider = provider
-        self._provider_config = provider_config
+        self._resolver = resolver
+        self._safety_guard = safety_guard
 
     async def stream_response(self, request: ChatRequest) -> AsyncIterator[str]:
         """Stream an SSE-framed companion reply for the given request.
 
         Args:
-            request: The conversation to reply to.
+            request: The conversation to reply to, optionally naming a
+                `model_id`.
 
         Yields:
             SSE `data:` lines: zero or more TOKEN chunks, followed by exactly
-            one DONE chunk, or one ERROR chunk if generation failed.
+            one DONE chunk, or one ERROR chunk if generation failed or the
+            safety guard intervened.
         """
         # Single hardcoded default persona for this increment — see
         # personas/base.py for where per-user/custom personas will plug in.
         persona = PersonaConfig()
         try:
-            async for token in self._provider.stream_reply(
-                request.messages, persona, self._provider_config
-            ):
+            provider, provider_config, is_uncensored = self._resolver.resolve(
+                request.model_id, persona
+            )
+            if is_uncensored:
+                self._safety_guard.check_request(request.messages)
+                # Uncensored providers get the non-moralizing system prompt
+                # (personas/base.py) even when picked explicitly by model_id
+                # rather than by persona mode.
+                persona = persona.model_copy(update={"mode": "intimate"})
+
+            stream = provider.stream_reply(request.messages, persona, provider_config)
+            if is_uncensored:
+                stream = self._safety_guard.wrap_stream(stream)
+
+            async for token in stream:
                 yield format_sse(StreamChunk(type=StreamChunkType.TOKEN, content=token))
             yield format_sse(StreamChunk(type=StreamChunkType.DONE))
-        except ProviderError as exc:
+        except (ProviderError, SafetyInterventionError) as exc:
             yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
-
-        # Future hook: a moderation/crisis-detection layer (SPEC.md §5) would
-        # wrap this loop — inspecting `request.messages` before generation
-        # and/or each yielded token before it reaches the client — rather
-        # than being built here now.

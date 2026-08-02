@@ -39,9 +39,13 @@ class ChatRequest(BaseModel):
 
     Attributes:
         messages: Full conversation so far, oldest first.
+        model_id: `ModelCatalogEntry.id` of the model to reply with. `None`
+            defers to `services/provider_router.py::ProviderResolver`'s
+            persona-mode routing, then `Settings.default_model_id`.
     """
 
     messages: list[ChatMessage]
+    model_id: str | None = None
 
 
 class StreamChunkType(str, Enum):

@@ -1,6 +1,11 @@
 """Unit tests for the persona placeholder module."""
 
-from src.personas.base import BASE_SYSTEM_INSTRUCTIONS, PersonaConfig, compose_system_prompt
+from src.personas.base import (
+    BASE_SYSTEM_INSTRUCTIONS,
+    INTIMATE_MODE_SYSTEM_INSTRUCTIONS,
+    PersonaConfig,
+    compose_system_prompt,
+)
 
 
 def test_compose_system_prompt_default_persona_returns_base_instructions() -> None:
@@ -15,3 +20,17 @@ def test_compose_system_prompt_appends_persona_instructions() -> None:
     prompt = compose_system_prompt(persona)
 
     assert prompt == f"{BASE_SYSTEM_INSTRUCTIONS}\n\nBe playful and curious."
+
+
+def test_compose_system_prompt_intimate_mode_returns_intimate_instructions() -> None:
+    prompt = compose_system_prompt(PersonaConfig(mode="intimate"))
+
+    assert prompt == INTIMATE_MODE_SYSTEM_INSTRUCTIONS
+
+
+def test_compose_system_prompt_intimate_mode_appends_persona_instructions() -> None:
+    persona = PersonaConfig(mode="intimate", persona_instructions="Be playful and curious.")
+
+    prompt = compose_system_prompt(persona)
+
+    assert prompt == f"{INTIMATE_MODE_SYSTEM_INSTRUCTIONS}\n\nBe playful and curious."

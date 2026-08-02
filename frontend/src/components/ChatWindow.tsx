@@ -3,11 +3,13 @@ import { streamChatReply } from "../api/chatClient";
 import { ChatRole, StreamChunkType, type ChatMessage } from "../types/chat";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
+import { ModelPicker } from "./ModelPicker";
 
 export function ChatWindow(): React.JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modelId, setModelId] = useState<string | undefined>(undefined);
 
   const handleSend = async (text: string): Promise<void> => {
     const conversation: ChatMessage[] = [...messages, { role: ChatRole.User, content: text }];
@@ -16,7 +18,7 @@ export function ChatWindow(): React.JSX.Element {
     setError(null);
 
     try {
-      for await (const chunk of streamChatReply(conversation)) {
+      for await (const chunk of streamChatReply(conversation, modelId)) {
         if (chunk.type === StreamChunkType.Token && chunk.content) {
           setMessages((prev) => {
             const next = [...prev];
@@ -37,6 +39,7 @@ export function ChatWindow(): React.JSX.Element {
 
   return (
     <div className="chat-window">
+      <ModelPicker value={modelId} onChange={setModelId} />
       <MessageList messages={messages} />
       {error && <div className="chat-error">{error}</div>}
       <MessageInput disabled={isStreaming} onSend={handleSend} />

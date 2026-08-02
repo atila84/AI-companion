@@ -13,6 +13,7 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   messages: ChatMessage[];
+  model_id?: string;
 }
 
 export enum StreamChunkType {
@@ -24,4 +25,15 @@ export enum StreamChunkType {
 export interface StreamChunk {
   type: StreamChunkType;
   content: string | null;
+}
+
+// Mirrors backend/src/config.py::ModelCatalogEntry.
+export interface ModelCatalogEntry {
+  id: string;
+  provider_id: string;
+  model: string;
+  display_name: string;
+  cost_tier: "free" | "paid";
+  uncensored: boolean;
+  enabled: boolean;
 }
