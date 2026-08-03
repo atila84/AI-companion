@@ -9,6 +9,8 @@ export enum ChatRole {
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Frontend-only display field for an auto-generated image reply; never sent to the backend. */
+  imageUrl?: string;
 }
 
 export interface ChatRequest {
@@ -18,6 +20,7 @@ export interface ChatRequest {
 
 export enum StreamChunkType {
   Token = "token",
+  Image = "image",
   Done = "done",
   Error = "error",
 }

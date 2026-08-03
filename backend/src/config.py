@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.services.image_providers.registry import ImageProviderId
 from src.services.providers.exceptions import ProviderConfigError
 from src.services.providers.registry import ProviderId
 
@@ -101,8 +102,8 @@ def _default_catalog() -> list[ModelCatalogEntry]:
         ModelCatalogEntry(
             id="openrouter/lumimaid-70b",
             provider_id=ProviderId.OPENROUTER,
-            model="neversleep/llama-3-lumimaid-70b",
-            display_name="Lumimaid 70B (uncensored)",
+            model="neversleep/llama-3.1-lumimaid-70b",
+            display_name="Lumimaid 70B v0.2 (uncensored)",
             cost_tier="paid",
             uncensored=True,
         ),
@@ -132,6 +133,65 @@ def _default_catalog() -> list[ModelCatalogEntry]:
     ]
 
 
+class ImageCatalogEntry(BaseModel):
+    """One selectable (provider, model) pair for image generation.
+
+    Same shape as `ModelCatalogEntry`, for the image-generation catalog
+    consumed by `services/image_router.py::ImageProviderResolver`.
+
+    Attributes:
+        id: Stable identifier, e.g. `"pollinations/flux"`.
+        provider_id: Which image provider factory handles this entry.
+        model: Backend-specific model string passed through to the SDK call.
+        display_name: Human-readable label (not yet surfaced in any UI).
+        cost_tier: Whether calling this model costs money.
+        uncensored: Whether this backend applies no built-in content filtering.
+        enabled: Allows disabling a catalog entry without deleting it.
+    """
+
+    id: str
+    provider_id: ImageProviderId
+    model: str
+    display_name: str
+    cost_tier: Literal["free", "paid"]
+    uncensored: bool = False
+    enabled: bool = True
+
+
+def _default_image_catalog() -> list[ImageCatalogEntry]:
+    """The initial hardcoded image-generation catalog.
+
+    Covers each requested tier: a free/uncensored hosted backend that needs
+    no setup (Pollinations.ai), a free/uncensored local backend (Automatic1111),
+    and a paid/filtered backend (OpenAI).
+    """
+    return [
+        ImageCatalogEntry(
+            id="pollinations/flux",
+            provider_id=ImageProviderId.POLLINATIONS,
+            model="flux",
+            display_name="Pollinations Flux (free, uncensored)",
+            cost_tier="free",
+            uncensored=True,
+        ),
+        ImageCatalogEntry(
+            id="automatic1111/sdxl",
+            provider_id=ImageProviderId.AUTOMATIC1111,
+            model="sdxl",
+            display_name="Stable Diffusion (local, uncensored)",
+            cost_tier="free",
+            uncensored=True,
+        ),
+        ImageCatalogEntry(
+            id="openai/dall-e-3",
+            provider_id=ImageProviderId.OPENAI,
+            model="dall-e-3",
+            display_name="DALL-E 3 (via OpenAI)",
+            cost_tier="paid",
+        ),
+    ]
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the AI Companion backend.
 
@@ -153,6 +213,16 @@ class Settings(BaseSettings):
             `PersonaConfig.mode == "intimate"` and the request omits an
             explicit `model_id`.
         model_catalog: The full set of selectable (provider, model) pairs.
+        automatic1111_base_url: Base URL of a local Automatic1111/ComfyUI
+            Stable Diffusion WebUI server. `None` (the default) disables the
+            `automatic1111` image catalog entry — unlike `ollama_base_url`,
+            a local SD server isn't assumed to be running.
+        default_image_model_id: `ImageCatalogEntry.id` used for every
+            auto-detected image-generation turn (see `services/image_intent.py`
+            and `ChatService`). Defaults to the Pollinations entry, which
+            needs no credentials, so image generation works out of the box.
+        image_model_catalog: The full set of selectable image-generation
+            (provider, model) pairs.
         cors_allow_origins: Origins allowed to call this API from a browser.
             Defaults to the local Vite dev server.
     """
@@ -167,6 +237,10 @@ class Settings(BaseSettings):
     default_model_id: str = "claude/claude-opus-5"
     intimate_mode_model_id: str = "openrouter/dolphin-mixtral-8x22b"
     model_catalog: list[ModelCatalogEntry] = Field(default_factory=_default_catalog)
+
+    automatic1111_base_url: str | None = None
+    default_image_model_id: str = "pollinations/flux"
+    image_model_catalog: list[ImageCatalogEntry] = Field(default_factory=_default_image_catalog)
 
     cors_allow_origins: list[str] = ["http://localhost:5173"]
 
@@ -212,6 +286,41 @@ class Settings(BaseSettings):
             if entry.id == model_id:
                 return entry
         raise ProviderConfigError(f"Unknown or disabled model_id: {model_id!r}")
+
+    def _has_image_credentials(self, provider_id: ImageProviderId) -> bool:
+        """Whether the given image provider has what it needs to be called."""
+        if provider_id == ImageProviderId.POLLINATIONS:
+            return True
+        if provider_id == ImageProviderId.AUTOMATIC1111:
+            return bool(self.automatic1111_base_url)
+        if provider_id == ImageProviderId.OPENAI:
+            return bool(self.openai_api_key)
+        return False
+
+    def enabled_image_catalog(self) -> list[ImageCatalogEntry]:
+        """Image catalog entries that are both `enabled` and actually callable."""
+        return [
+            entry
+            for entry in self.image_model_catalog
+            if entry.enabled and self._has_image_credentials(entry.provider_id)
+        ]
+
+    def image_catalog_entry(self, model_id: str) -> ImageCatalogEntry:
+        """Look up an enabled image catalog entry by id.
+
+        Args:
+            model_id: An `ImageCatalogEntry.id`.
+
+        Returns:
+            The matching entry.
+
+        Raises:
+            ProviderConfigError: No enabled entry has this id.
+        """
+        for entry in self.enabled_image_catalog():
+            if entry.id == model_id:
+                return entry
+        raise ProviderConfigError(f"Unknown or disabled image model_id: {model_id!r}")
 
 
 @lru_cache

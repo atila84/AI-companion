@@ -69,6 +69,13 @@ body {
   color: #1a1a1a;
 }
 
+.message-image {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
 .chat-error {
   padding: 0.5rem 1rem;
   color: #b91c1c;

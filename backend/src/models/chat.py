@@ -52,6 +52,7 @@ class StreamChunkType(str, Enum):
     """The kind of payload carried by one SSE `StreamChunk`."""
 
     TOKEN = "token"
+    IMAGE = "image"
     DONE = "done"
     ERROR = "error"
 
@@ -60,10 +61,11 @@ class StreamChunk(BaseModel):
     """One SSE `data:` payload streamed back to the client.
 
     Attributes:
-        type: Whether this chunk carries a text fragment, marks the end of
-            the stream, or reports an error.
-        content: Token text for TOKEN chunks, an error message for ERROR
-            chunks, and `None` for DONE chunks.
+        type: Whether this chunk carries a text fragment, a generated image,
+            marks the end of the stream, or reports an error.
+        content: Token text for TOKEN chunks, an image URL or
+            `data:image/...;base64,...` URI for IMAGE chunks, an error
+            message for ERROR chunks, and `None` for DONE chunks.
     """
 
     type: StreamChunkType

@@ -24,11 +24,11 @@ def create_app() -> FastAPI:
     """
     try:
         settings = get_settings()
-    except ValidationError:
+    except ValidationError as exc:
         sys.stderr.write(
-            "\nFATAL: ANTHROPIC_API_KEY is not set.\n"
-            "Copy backend/.env.example to backend/.env and set your key, "
-            "then restart.\n\n"
+            f"\nFATAL: invalid backend configuration.\n{exc}\n\n"
+            "Check backend/.env against backend/.env.example — either a "
+            "required key is missing or it has a stray/unknown variable.\n\n"
         )
         raise
 

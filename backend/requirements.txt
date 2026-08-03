@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 anthropic
 openai
+httpx
 pydantic
 pydantic-settings
 python-dotenv
