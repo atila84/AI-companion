@@ -112,6 +112,38 @@ async def test_image_intent_short_circuits_the_text_provider() -> None:
     assert any('"type":"done"' in chunk for chunk in chunks)
 
 
+async def test_crisis_phrase_is_caught_even_when_message_also_matches_image_intent() -> None:
+    """Finding 1 regression: a bare "draw" trigger must not bypass the crisis guard."""
+    provider = _RecordingProvider()
+
+    class _FailingImageResolver:
+        def resolve(
+            self, requested_model_id: str | None = None
+        ) -> tuple[ImageGenerationProvider, ImageGenerationConfig]:
+            raise AssertionError("Should not be called once the crisis guard intervenes")
+
+    service = ChatService(
+        _FixedResolver(provider, is_uncensored=False),
+        UncensoredSafetyGuard(),
+        _FailingImageResolver(),
+        ImageContentGuard(),
+    )
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role=ChatRole.USER,
+                content="I've been meaning to draw more but I want to end my life honestly.",
+            )
+        ]
+    )
+
+    chunks = [chunk async for chunk in service.stream_response(request)]
+
+    assert provider.received_persona is None
+    assert any('"type":"error"' in chunk for chunk in chunks)
+    assert not any('"type":"image"' in chunk for chunk in chunks)
+
+
 async def test_image_intent_blocked_by_content_guard_never_calls_provider() -> None:
     provider = _RecordingProvider()
 

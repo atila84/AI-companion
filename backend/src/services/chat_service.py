@@ -29,7 +29,10 @@ class ChatService:
         Args:
             resolver: Resolves each request to a provider, generation config,
                 and whether that provider is uncensored.
-            safety_guard: Independent safety check applied only when the
+            safety_guard: Crisis-phrase check. `check_request` runs
+                unconditionally on every message before persona/provider
+                resolution and before the image-intent branch; `wrap_stream`
+                additionally scans the reply stream, but only when the
                 resolved provider is uncensored (see SPEC.md §5).
             image_resolver: Resolves an image-generation turn to a provider
                 and generation config.
@@ -54,6 +57,16 @@ class ChatService:
             request, followed by exactly one DONE chunk, or one ERROR chunk
             if generation failed or a safety guard intervened.
         """
+        try:
+            # Crisis-phrase check runs first, on the raw message, regardless
+            # of whether it ends up routed to image generation or text —
+            # image generation never reaches an LLM and has no self-moderation
+            # of its own to fall back on (see safety/uncensored_guard.py).
+            self._safety_guard.check_request(request.messages)
+        except SafetyInterventionError as exc:
+            yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
+            return
+
         image_prompt = detect_image_prompt(request.messages[-1].content) if request.messages else None
         if image_prompt is not None:
             async for event in self._stream_image_response(image_prompt):
@@ -68,7 +81,6 @@ class ChatService:
                 request.model_id, persona
             )
             if is_uncensored:
-                self._safety_guard.check_request(request.messages)
                 # Uncensored providers get the non-moralizing system prompt
                 # (personas/base.py) even when picked explicitly by model_id
                 # rather than by persona mode.
