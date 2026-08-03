@@ -62,6 +62,15 @@ class PersonaConfig(BaseModel):
             `ChatService` also sets this to `"intimate"` whenever the
             resolved provider is uncensored, even if the client picked it
             explicitly by `model_id` rather than by mode.
+
+            `ChatService` always constructs this with the default
+            `"companionship"`, so `ProviderResolver`'s mode-based routing
+            precedence exists for forward compatibility but is not
+            reachable from any real request today — the only live path to
+            the uncensored/intimate tier (for both text and image
+            generation) is an explicit uncensored `model_id`. That's
+            intentional for this single-persona increment; it'll become
+            reachable once real mode/persona selection lands (SPEC.md §3).
     """
 
     name: str = "Default Companion"
