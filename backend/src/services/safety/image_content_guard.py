@@ -1,13 +1,22 @@
-"""Independent, unconditional safety check for every image-generation prompt.
+"""Safety check for every image-generation prompt, in two tiers.
+
+Two independent checks live here, mirroring SPEC.md §5's structure:
+
+1. The hard content exclusion list (minor-coded + sexual combinations,
+   non-consent terms) — "enforced at the system/application level, above
+   every persona and every backend, non-negotiable" — checked unconditionally,
+   regardless of mode.
+2. The companionship/intimate content-tier boundary (SPEC.md §5 "Content
+   tiers") — plain sexual content is only permitted when the resolved text
+   provider for this request is uncensored (`is_uncensored=True`, i.e. the
+   intimate tier); otherwise it's blocked the same way Claude would decline
+   it in text.
 
 Unlike `uncensored_guard.py::UncensoredSafetyGuard`, which only wraps
-`uncensored=True` chat providers, this guard runs on **every** image prompt
-regardless of which backend generates it. SPEC.md §5's hard content exclusion
-list (no non-consent themes, no minor-coded scenarios, no real identifiable
-people) is "enforced at the system/application level, above every persona and
-every backend, non-negotiable" — and image generation has no LLM in the loop
-to apply the kind of contextual judgment Claude applies to text, so the
-application-layer check has to do all the work here.
+`uncensored=True` chat providers, tier 1 here runs on **every** image prompt
+regardless of which backend generates it — image generation has no LLM in
+the loop to apply the kind of contextual judgment Claude applies to text, so
+the application-layer check has to do all the work.
 
 This is a keyword-based placeholder, same spirit as `uncensored_guard.py`:
 easy to extend, not a complete solution. In particular, real-identifiable-
@@ -63,19 +72,31 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
 class ImageContentGuard:
     """Keyword check enforcing SPEC.md §5's hard exclusion list on image prompts."""
 
-    def check_prompt(self, prompt: str) -> None:
-        """Check an image-generation prompt against the hard exclusion list.
+    def check_prompt(self, prompt: str, is_uncensored: bool) -> None:
+        """Check an image-generation prompt against both safety tiers.
 
         Args:
-            prompt: The extracted image prompt about to be sent to a
-                provider.
+            prompt: The user's message to check. Should be the raw message
+                text rather than a post-extraction remainder — extraction can
+                strand descriptor words outside what it returns (see
+                `ChatService._stream_image_response`), which would let
+                explicit content slip past a check of the extracted text
+                alone.
+            is_uncensored: Whether this request resolved to an uncensored
+                text provider. Gates the content-tier check only — the hard
+                exclusion list below is checked regardless.
 
         Raises:
             SafetyInterventionError: The prompt combines minor-coded language
-                with sexual context, or contains a non-consent term.
+                with sexual context, contains a non-consent term (both
+                checked unconditionally), or requests plain sexual content
+                while `is_uncensored` is False (this mode's content-tier
+                boundary).
         """
         lowered = prompt.lower()
         if _contains_any(lowered, MINOR_CODED_TERMS) and _contains_any(lowered, SEXUAL_CONTEXT_TERMS):
             raise SafetyInterventionError("This image request isn't something I can generate.")
         if _contains_any(lowered, NON_CONSENT_TERMS):
             raise SafetyInterventionError("This image request isn't something I can generate.")
+        if not is_uncensored and _contains_any(lowered, SEXUAL_CONTEXT_TERMS):
+            raise SafetyInterventionError("This image request isn't something I can generate in this mode.")
