@@ -23,7 +23,18 @@ def test_build_provider_dispatches_claude(settings: Settings) -> None:
     assert isinstance(build_provider(ProviderId.CLAUDE, settings), ClaudeProvider)
 
 
-def test_build_provider_dispatches_ollama_without_api_key(settings: Settings) -> None:
+def test_build_provider_raises_for_ollama_without_base_url(settings: Settings) -> None:
+    with pytest.raises(ProviderConfigError):
+        build_provider(ProviderId.OLLAMA, settings)
+
+
+def test_build_provider_dispatches_ollama_without_api_key_once_base_url_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
     assert isinstance(build_provider(ProviderId.OLLAMA, settings), OllamaProvider)
 
 

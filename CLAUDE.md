@@ -12,7 +12,7 @@ is the superseded rough draft kept for historical context only. `USAGE.md` has l
 instructions — don't duplicate them here, refer to that file.
 
 ## Lessons
-[Here claude code with write learned lessons for each session if any. Lessons are things that might usefull in the feature]
+[Here claude code will write learned lessons for each session if any. Lessons are things that might usefull in the feature]
 
 ## Commands
 

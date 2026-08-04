@@ -29,12 +29,17 @@ class ChatService:
         Args:
             resolver: Resolves each request to a provider, generation config,
                 and whether that provider is uncensored.
-            safety_guard: Independent safety check applied only when the
+            safety_guard: Crisis-phrase check. `check_request` runs
+                unconditionally on every message before persona/provider
+                resolution and before the image-intent branch; `wrap_stream`
+                additionally scans the reply stream, but only when the
                 resolved provider is uncensored (see SPEC.md §5).
             image_resolver: Resolves an image-generation turn to a provider
                 and generation config.
-            image_content_guard: Independent, unconditional check of every
-                image prompt against SPEC.md §5's hard exclusion list.
+            image_content_guard: Checks every image prompt against SPEC.md
+                §5's hard exclusion list unconditionally, plus the
+                companionship/intimate content-tier boundary when the
+                resolved provider is not uncensored.
         """
         self._resolver = resolver
         self._safety_guard = safety_guard
@@ -54,10 +59,14 @@ class ChatService:
             request, followed by exactly one DONE chunk, or one ERROR chunk
             if generation failed or a safety guard intervened.
         """
-        image_prompt = detect_image_prompt(request.messages[-1].content) if request.messages else None
-        if image_prompt is not None:
-            async for event in self._stream_image_response(image_prompt):
-                yield event
+        try:
+            # Crisis-phrase check runs first, on the raw message, regardless
+            # of whether it ends up routed to image generation or text —
+            # image generation never reaches an LLM and has no self-moderation
+            # of its own to fall back on (see safety/uncensored_guard.py).
+            self._safety_guard.check_request(request.messages)
+        except SafetyInterventionError as exc:
+            yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
             return
 
         # Single hardcoded default persona for this increment — see
@@ -67,13 +76,28 @@ class ChatService:
             provider, provider_config, is_uncensored = self._resolver.resolve(
                 request.model_id, persona
             )
-            if is_uncensored:
-                self._safety_guard.check_request(request.messages)
-                # Uncensored providers get the non-moralizing system prompt
-                # (personas/base.py) even when picked explicitly by model_id
-                # rather than by persona mode.
-                persona = persona.model_copy(update={"mode": "intimate"})
+        except ProviderError as exc:
+            yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
+            return
 
+        # Resolved before branching so image generation respects the same
+        # companionship/intimate content boundary as text, instead of always
+        # falling back to the uncensored image backend regardless of mode.
+        image_prompt = detect_image_prompt(request.messages[-1].content) if request.messages else None
+        if image_prompt is not None:
+            async for event in self._stream_image_response(
+                request.messages[-1].content, image_prompt, is_uncensored
+            ):
+                yield event
+            return
+
+        if is_uncensored:
+            # Uncensored providers get the non-moralizing system prompt
+            # (personas/base.py) even when picked explicitly by model_id
+            # rather than by persona mode.
+            persona = persona.model_copy(update={"mode": "intimate"})
+
+        try:
             stream = provider.stream_reply(request.messages, persona, provider_config)
             if is_uncensored:
                 stream = self._safety_guard.wrap_stream(stream)
@@ -84,19 +108,30 @@ class ChatService:
         except (ProviderError, SafetyInterventionError) as exc:
             yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
 
-    async def _stream_image_response(self, prompt: str) -> AsyncIterator[str]:
+    async def _stream_image_response(
+        self, raw_message: str, prompt: str, is_uncensored: bool
+    ) -> AsyncIterator[str]:
         """Generate an image for `prompt` and stream it as SSE chunks.
 
         Args:
+            raw_message: The user's original message, checked against the
+                content guard in full — `prompt` alone can be missing
+                descriptor words `detect_image_prompt` strands outside the
+                extracted remainder (e.g. "show me a nude picture of you"
+                extracts to just "you").
             prompt: The image description extracted by
-                `services/image_intent.py::detect_image_prompt`.
+                `services/image_intent.py::detect_image_prompt`, passed to
+                the provider for generation.
+            is_uncensored: Whether this request resolved to an uncensored
+                text provider — gates the content-tier boundary check (SPEC.md
+                §5's hard exclusion list is checked regardless).
 
         Yields:
             One IMAGE chunk followed by one DONE chunk, or one ERROR chunk if
             the content guard blocked the prompt or generation failed.
         """
         try:
-            self._image_content_guard.check_prompt(prompt)
+            self._image_content_guard.check_prompt(raw_message, is_uncensored)
             provider, config = self._image_resolver.resolve()
             image_url = await provider.generate_image(prompt, config)
             yield format_sse(StreamChunk(type=StreamChunkType.IMAGE, content=image_url))

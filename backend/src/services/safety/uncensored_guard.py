@@ -1,10 +1,13 @@
-"""Independent safety check for uncensored providers.
+"""Independent crisis-phrase safety check.
 
+`check_request` runs unconditionally on every incoming message — before
+persona/provider resolution and before the image-intent branch — because
+image generation never reaches an LLM and has no self-moderation to fall
+back on. `wrap_stream` additionally scans the model's reply, but only when
+the resolved provider is uncensored (`uncensored=True` catalog entries):
 Claude relies on its own built-in safety tuning and LLM judgment for
-crisis-adjacent content (SPEC.md §5). Uncensored providers (`uncensored=True`
-catalog entries) have no such built-in filtering, so any conversation routed
-to one is additionally checked here — independently of persona and of
-whichever provider is in use. This is a keyword-based placeholder for the
+crisis-adjacent content (SPEC.md §5), while uncensored open-weight models
+have no such built-in filtering. This is a keyword-based placeholder for the
 classifier-backed version SPEC.md §5 describes as future work; the trigger
 list is intentionally small and easy to extend without touching call sites.
 """
@@ -24,10 +27,28 @@ CRISIS_TRIGGER_PHRASES: Final[tuple[str, ...]] = (
     "hurt myself",
 )
 
+_MAX_TRIGGER_PHRASE_LEN: Final[int] = max(len(phrase) for phrase in CRISIS_TRIGGER_PHRASES)
+
 
 def _contains_trigger_phrase(text: str) -> bool:
     lowered = text.lower()
     return any(phrase in lowered for phrase in CRISIS_TRIGGER_PHRASES)
+
+
+def _trim_to_trailing_context(buffer: str, max_len: int) -> str:
+    """Keep only enough trailing text to catch a phrase split across a token boundary.
+
+    Args:
+        buffer: Accumulated text so far.
+        max_len: Length of the longest trigger phrase being matched against.
+
+    Returns:
+        `buffer` unchanged if it's no longer than `max_len`, otherwise its
+        last `max_len - 1` characters.
+    """
+    if len(buffer) <= max_len:
+        return buffer
+    return buffer[-(max_len - 1) :]
 
 
 class UncensoredSafetyGuard:
@@ -62,11 +83,15 @@ class UncensoredSafetyGuard:
             SafetyInterventionError: A crisis trigger phrase was found in the
                 model's reply.
         """
-        buffer = ""
+        # A sliding window sized to the longest trigger phrase is enough to
+        # catch a phrase split across a token boundary — no need to retain
+        # the whole accumulated reply just to do substring checks.
+        window = ""
         async for token in tokens:
-            buffer += token
-            if _contains_trigger_phrase(buffer):
+            window += token
+            if _contains_trigger_phrase(window):
                 raise SafetyInterventionError(
                     "This conversation needs a different kind of support right now."
                 )
             yield token
+            window = _trim_to_trailing_context(window, _MAX_TRIGGER_PHRASE_LEN)

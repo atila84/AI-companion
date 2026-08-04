@@ -8,7 +8,14 @@ using them in both places does not leak provider-specific concerns into the API.
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# Caps below are deliberately generous application-level backstops, not
+# product-tuned limits — there is no auth or rate limiting anywhere in the
+# API yet (SPEC.md §4 future work), so an unbounded payload would otherwise
+# be forwarded verbatim to a paid LLM provider on every request.
+_MAX_MESSAGE_LENGTH = 8000
+_MAX_MESSAGES_PER_REQUEST = 200
 
 
 class ChatRole(str, Enum):
@@ -27,7 +34,7 @@ class ChatMessage(BaseModel):
     """
 
     role: ChatRole
-    content: str
+    content: str = Field(min_length=1, max_length=_MAX_MESSAGE_LENGTH)
 
 
 class ChatRequest(BaseModel):
@@ -44,7 +51,7 @@ class ChatRequest(BaseModel):
             persona-mode routing, then `Settings.default_model_id`.
     """
 
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1, max_length=_MAX_MESSAGES_PER_REQUEST)
     model_id: str | None = None
 
 

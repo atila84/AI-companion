@@ -19,8 +19,13 @@ export function ChatWindow(): React.JSX.Element {
 
     try {
       // Strip the frontend-only `imageUrl` display field before sending —
-      // the backend's ChatMessage model doesn't know about it.
-      const wireConversation = conversation.map(({ role, content }) => ({ role, content }));
+      // the backend's ChatMessage model doesn't know about it. An
+      // image-only reply has no token content, but the backend requires
+      // non-empty content, so substitute placeholder text for it here.
+      const wireConversation = conversation.map(({ role, content, imageUrl }) => ({
+        role,
+        content: content || (imageUrl ? "[Generated image]" : content),
+      }));
       for await (const chunk of streamChatReply(wireConversation, modelId)) {
         if (chunk.type === StreamChunkType.Token && chunk.content) {
           setMessages((prev) => {
@@ -44,6 +49,16 @@ export function ChatWindow(): React.JSX.Element {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setIsStreaming(false);
+      // A turn that produced zero tokens and no image (a provider error or
+      // a safety-guard block) leaves a dead empty bubble — drop it so it
+      // doesn't fail the non-empty-content check on a future send.
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === ChatRole.Assistant && !last.content && !last.imageUrl) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     }
   };
 
