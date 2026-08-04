@@ -6,7 +6,7 @@ import pytest
 
 from src.models.chat import ChatMessage, ChatRole
 from src.services.safety.exceptions import SafetyInterventionError
-from src.services.safety.uncensored_guard import UncensoredSafetyGuard
+from src.services.safety.uncensored_guard import UncensoredSafetyGuard, _trim_to_trailing_context
 
 
 async def _tokens(*parts: str) -> AsyncIterator[str]:
@@ -44,3 +44,26 @@ async def test_wrap_stream_raises_when_trigger_phrase_assembles_across_tokens(
     with pytest.raises(SafetyInterventionError):
         async for _ in guard.wrap_stream(_tokens("I want to ", "end my life")):
             pass
+
+
+async def test_wrap_stream_raises_when_trigger_phrase_assembles_across_many_single_char_tokens(
+    guard: UncensoredSafetyGuard,
+) -> None:
+    # A long benign prefix streamed one character at a time, followed by a
+    # trigger phrase split across a token boundary. Finding 6 regression:
+    # this must still be caught by a bounded trailing window, not require
+    # retaining the whole accumulated reply.
+    prefix = list("a" * 5000)
+    with pytest.raises(SafetyInterventionError):
+        async for _ in guard.wrap_stream(_tokens(*prefix, "end my ", "life")):
+            pass
+
+
+def test_trim_to_trailing_context_keeps_short_buffers_unchanged() -> None:
+    assert _trim_to_trailing_context("hello", max_len=10) == "hello"
+
+
+def test_trim_to_trailing_context_caps_long_buffers_to_max_len_minus_one() -> None:
+    trimmed = _trim_to_trailing_context("a" * 1000, max_len=11)
+
+    assert trimmed == "a" * 10

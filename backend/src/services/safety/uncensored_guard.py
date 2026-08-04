@@ -27,10 +27,28 @@ CRISIS_TRIGGER_PHRASES: Final[tuple[str, ...]] = (
     "hurt myself",
 )
 
+_MAX_TRIGGER_PHRASE_LEN: Final[int] = max(len(phrase) for phrase in CRISIS_TRIGGER_PHRASES)
+
 
 def _contains_trigger_phrase(text: str) -> bool:
     lowered = text.lower()
     return any(phrase in lowered for phrase in CRISIS_TRIGGER_PHRASES)
+
+
+def _trim_to_trailing_context(buffer: str, max_len: int) -> str:
+    """Keep only enough trailing text to catch a phrase split across a token boundary.
+
+    Args:
+        buffer: Accumulated text so far.
+        max_len: Length of the longest trigger phrase being matched against.
+
+    Returns:
+        `buffer` unchanged if it's no longer than `max_len`, otherwise its
+        last `max_len - 1` characters.
+    """
+    if len(buffer) <= max_len:
+        return buffer
+    return buffer[-(max_len - 1) :]
 
 
 class UncensoredSafetyGuard:
@@ -65,11 +83,15 @@ class UncensoredSafetyGuard:
             SafetyInterventionError: A crisis trigger phrase was found in the
                 model's reply.
         """
-        buffer = ""
+        # A sliding window sized to the longest trigger phrase is enough to
+        # catch a phrase split across a token boundary — no need to retain
+        # the whole accumulated reply just to do substring checks.
+        window = ""
         async for token in tokens:
-            buffer += token
-            if _contains_trigger_phrase(buffer):
+            window += token
+            if _contains_trigger_phrase(window):
                 raise SafetyInterventionError(
                     "This conversation needs a different kind of support right now."
                 )
             yield token
+            window = _trim_to_trailing_context(window, _MAX_TRIGGER_PHRASE_LEN)
