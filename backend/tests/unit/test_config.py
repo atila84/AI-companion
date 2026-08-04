@@ -37,7 +37,18 @@ def test_enabled_catalog_excludes_providers_without_credentials(settings: Settin
     assert "claude" in enabled_provider_ids
     assert "openrouter" not in enabled_provider_ids
     assert "openai" not in enabled_provider_ids
-    # Ollama needs no API key, only a base URL, which has a default.
+    # Ollama needs no API key, but a local server isn't assumed to be
+    # running -- opt in explicitly via OLLAMA_BASE_URL, like automatic1111.
+    assert "ollama" not in enabled_provider_ids
+
+
+def test_enabled_catalog_includes_ollama_once_base_url_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    enabled_provider_ids = {entry.provider_id for entry in settings.enabled_catalog()}
+
     assert "ollama" in enabled_provider_ids
 
 

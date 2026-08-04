@@ -206,7 +206,10 @@ class Settings(BaseSettings):
         openai_api_key: OpenAI API key. `None` disables every catalog entry
             with `provider_id == ProviderId.OPENAI`.
         ollama_base_url: Base URL of a local/remote Ollama server's
-            OpenAI-compatible API. No API key is required for Ollama.
+            OpenAI-compatible API. No API key is required for Ollama, but
+            `None` (the default) disables the Ollama catalog entries — like
+            `automatic1111_base_url`, a local Ollama server isn't assumed to
+            be running.
         default_model_id: `ModelCatalogEntry.id` used when a request omits
             `model_id` and no persona-mode routing rule applies.
         intimate_mode_model_id: `ModelCatalogEntry.id` routed to when
@@ -232,7 +235,7 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str | None = None
     openai_api_key: str | None = None
-    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_base_url: str | None = None
 
     default_model_id: str = "claude/claude-opus-5"
     intimate_mode_model_id: str = "openrouter/dolphin-mixtral-8x22b"
