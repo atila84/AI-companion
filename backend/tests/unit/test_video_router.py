@@ -25,11 +25,11 @@ def test_default_routing_picks_comfyui_when_configured(resolver: VideoProviderRe
     provider, config = resolver.resolve()
 
     assert isinstance(provider, ComfyUIVideoProvider)
-    assert config.model == "wan2.2"
+    assert config.model == "ltx-video"
 
 
 def test_explicit_model_id_is_honored(resolver: VideoProviderResolver) -> None:
-    provider, _ = resolver.resolve("comfyui/wan2.2")
+    provider, _ = resolver.resolve("comfyui/ltx-video")
 
     assert isinstance(provider, ComfyUIVideoProvider)
 

@@ -37,7 +37,11 @@ def _openai_client(api_key: str) -> openai.AsyncOpenAI:
 def _build_comfyui(settings: "Settings") -> VideoGenerationProvider:
     if not settings.comfyui_base_url:
         raise ProviderConfigError("COMFYUI_BASE_URL is not set.")
-    return ComfyUIVideoProvider(settings.comfyui_base_url)
+    return ComfyUIVideoProvider(
+        settings.comfyui_base_url,
+        settings.comfyui_workflow_dir,
+        settings.comfyui_timeout_seconds,
+    )
 
 
 def _build_openai_video(settings: "Settings") -> VideoGenerationProvider:

@@ -394,13 +394,13 @@ async def test_video_model_id_is_forwarded_to_the_video_resolver() -> None:
     )
     request = ChatRequest(
         messages=[ChatMessage(role=ChatRole.USER, content="generate a video of a sunset")],
-        video_model_id="comfyui/wan2.2",
+        video_model_id="comfyui/ltx-video",
     )
 
     async for _ in service.stream_response(request):
         pass
 
-    assert video_resolver.received_model_id == "comfyui/wan2.2"
+    assert video_resolver.received_model_id == "comfyui/ltx-video"
 
 
 async def test_unknown_image_model_id_yields_an_error_chunk_not_a_crash() -> None:

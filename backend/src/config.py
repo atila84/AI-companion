@@ -7,6 +7,7 @@ request — see `src/main.py` for how this is surfaced as a clear startup error.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -215,7 +216,7 @@ class VideoCatalogEntry(BaseModel):
     consumed by `services/video_router.py::VideoProviderResolver`.
 
     Attributes:
-        id: Stable identifier, e.g. `"comfyui/wan2.2"`.
+        id: Stable identifier, e.g. `"comfyui/ltx-video"`.
         provider_id: Which video provider factory handles this entry.
         model: Backend-specific model string passed through to the SDK call.
         display_name: Human-readable label (not yet surfaced in any UI).
@@ -236,19 +237,25 @@ class VideoCatalogEntry(BaseModel):
 def _default_video_catalog() -> list[VideoCatalogEntry]:
     """The initial hardcoded video-generation catalog.
 
-    Covers a free/uncensored local backend (a self-hosted ComfyUI server
-    running an open-weight model such as Wan 2.2 or HunyuanVideo) and a
-    paid/filtered backend (OpenAI's Sora). Unlike images, there is currently
-    no free *hosted* (no-setup) video tier known to be reliable enough to
-    hardcode here — add one if/when a provider like Pollinations ships a
-    documented video endpoint.
+    Covers a free/uncensored local backend (a self-hosted ComfyUI server) and
+    a paid/filtered backend (OpenAI's Sora). There is no free *hosted* video
+    tier to point at: every Pollinations video model is paid-only, and
+    Hugging Face retired its free serverless inference API.
+
+    For ComfyUI entries, `model` names the exported workflow file stem under
+    `Settings.comfyui_workflow_dir` rather than a model the provider loads
+    itself — the workflow decides the model (see
+    `services/video_providers/comfyui_provider.py`). LTX-Video is the default
+    because it is the open video model with a workable Apple-Silicon path;
+    Wan 2.2 has no stable Metal support and is reported to corrupt output on
+    M4 specifically (ComfyUI issue #15793).
     """
     return [
         VideoCatalogEntry(
-            id="comfyui/wan2.2",
+            id="comfyui/ltx-video",
             provider_id=VideoProviderId.COMFYUI,
-            model="wan2.2",
-            display_name="Wan 2.2 (local, uncensored)",
+            model="ltx-video",
+            display_name="LTX-Video (local, uncensored)",
             cost_tier="free",
             uncensored=True,
         ),
@@ -296,11 +303,15 @@ class Settings(BaseSettings):
             needs no credentials, so image generation works out of the box.
         image_model_catalog: The full set of selectable image-generation
             (provider, model) pairs.
-        comfyui_base_url: Base URL of a local ComfyUI-compatible server
-            running an open-weight video model. `None` (the default)
-            disables the `comfyui` video catalog entry — like
-            `automatic1111_base_url`, a local server isn't assumed to be
-            running.
+        comfyui_base_url: Base URL of a local ComfyUI server running an
+            open-weight video model. `None` (the default) disables the
+            `comfyui` video catalog entry — like `automatic1111_base_url`, a
+            local server isn't assumed to be running.
+        comfyui_workflow_dir: Directory holding workflow graphs exported from
+            ComfyUI (Workflow -> Export (API)). A ComfyUI catalog entry's
+            `model` names the file stem within it.
+        comfyui_timeout_seconds: Overall budget for one video generation.
+            Generous by default because local video generation takes minutes.
         default_video_model_id: `VideoCatalogEntry.id` used for every
             auto-detected video-generation turn (see `services/video_intent.py`
             and `ChatService`).
@@ -326,7 +337,9 @@ class Settings(BaseSettings):
     image_model_catalog: list[ImageCatalogEntry] = Field(default_factory=_default_image_catalog)
 
     comfyui_base_url: str | None = None
-    default_video_model_id: str = "comfyui/wan2.2"
+    comfyui_workflow_dir: Path = Path("workflows")
+    comfyui_timeout_seconds: int = Field(default=900, gt=0)
+    default_video_model_id: str = "comfyui/ltx-video"
     video_model_catalog: list[VideoCatalogEntry] = Field(default_factory=_default_video_catalog)
 
     cors_allow_origins: list[str] = ["http://localhost:5173"]

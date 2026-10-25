@@ -78,5 +78,5 @@ async def test_list_video_models_includes_comfyui_when_configured(app_module) ->
     )
 
     ids = [entry["id"] for entry in response.json()]
-    assert "comfyui/wan2.2" in ids
+    assert "comfyui/ltx-video" in ids
     assert "openai/sora-2" not in ids
