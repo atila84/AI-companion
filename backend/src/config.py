@@ -57,17 +57,24 @@ def _default_catalog() -> list[ModelCatalogEntry]:
             cost_tier="paid",
         ),
         ModelCatalogEntry(
-            id="openrouter/llama-3.1-8b-instruct-free",
+            id="openrouter/llama-3.1-8b-instruct",
             provider_id=ProviderId.OPENROUTER,
-            model="meta-llama/llama-3.1-8b-instruct:free",
-            display_name="Llama 3.1 8B (free)",
-            cost_tier="free",
+            model="meta-llama/llama-3.1-8b-instruct",
+            display_name="Llama 3.1 8B (via OpenRouter)",
+            cost_tier="paid",
         ),
         ModelCatalogEntry(
             id="openrouter/gemma-2-9b-it-free",
             provider_id=ProviderId.OPENROUTER,
             model="google/gemma-2-9b-it:free",
             display_name="Gemma 2 9B (free)",
+            cost_tier="free",
+        ),
+        ModelCatalogEntry(
+            id="openrouter/deepseek-chat-free",
+            provider_id=ProviderId.OPENROUTER,
+            model="deepseek/deepseek-chat-v3.1:free",
+            display_name="DeepSeek Chat V3 (free)",
             cost_tier="free",
         ),
         ModelCatalogEntry(
