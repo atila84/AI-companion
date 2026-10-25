@@ -56,13 +56,17 @@ _POLL_INTERVAL_SECONDS = 2.0
 # which one the workflow ends with (`SaveVideo`, `SaveAnimatedWEBP`,
 # VideoHelperSuite's `VHS_VideoCombine`, …), so the file is located by shape
 # rather than by key — see `_find_output_file`.
+# Only playable/animated containers belong here. Anything else means the
+# workflow ended in a still-image save node, which is worth an error rather
+# than a mislabelled payload the <video> tag would silently fail to play.
 _MIME_BY_SUFFIX = {
     ".mp4": "video/mp4",
     ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
     ".webp": "image/webp",
     ".gif": "image/gif",
 }
-_DEFAULT_MIME = "video/mp4"
 
 
 class ComfyUIVideoProvider(VideoGenerationProvider):
@@ -98,8 +102,8 @@ class ComfyUIVideoProvider(VideoGenerationProvider):
         Raises:
             ProviderConfigError: The workflow file is missing, is not valid
                 JSON, or lacks the `{prompt}` placeholder.
-            ProviderAPIError: ComfyUI rejected the graph, produced no file, or
-                did not finish within the timeout.
+            ProviderAPIError: ComfyUI rejected the graph, produced no file or
+                a non-video one, or did not finish within the timeout.
         """
         graph = self._load_workflow(config.model, prompt)
         deadline = time.monotonic() + self._timeout_seconds
@@ -118,7 +122,14 @@ class ComfyUIVideoProvider(VideoGenerationProvider):
         except httpx.HTTPError as exc:
             raise ProviderAPIError(f"ComfyUI request failed: {exc}") from exc
 
-        mime = _MIME_BY_SUFFIX.get(Path(file_ref["filename"]).suffix.lower(), _DEFAULT_MIME)
+        filename = file_ref["filename"]
+        mime = _MIME_BY_SUFFIX.get(Path(filename).suffix.lower())
+        if mime is None:
+            raise ProviderAPIError(
+                f"ComfyUI returned {filename}, which is not a video. The workflow's save "
+                "node produces still images — use a video save node (SaveVideo, "
+                "SaveAnimatedWEBP or VHS_VideoCombine)."
+            )
         return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
 
     def _load_workflow(self, workflow_name: str, prompt: str) -> dict[str, Any]:

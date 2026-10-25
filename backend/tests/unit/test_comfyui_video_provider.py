@@ -289,3 +289,16 @@ def test_randomize_seeds_leaves_linked_inputs_alone() -> None:
     _randomize_seeds(graph)
 
     assert graph["3"]["inputs"]["seed"] == ["10", 0]
+
+
+async def test_still_image_output_raises_instead_of_mislabelling_it(
+    provider: ComfyUIVideoProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a PNG was being returned as `data:video/mp4`, which the
+    frontend's <video> tag silently fails to play. Found by running against a
+    real ComfyUI whose workflow ended in SaveImage."""
+    handler, _ = _make_handler([_completed(filename="ComfyUI_00001_.png")])
+    _patch_client(monkeypatch, handler)
+
+    with pytest.raises(ProviderAPIError, match="not a video"):
+        await provider.generate_video("x", VideoGenerationConfig(model="ltx-video"))
