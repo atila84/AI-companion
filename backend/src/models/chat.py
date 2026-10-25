@@ -49,10 +49,18 @@ class ChatRequest(BaseModel):
         model_id: `ModelCatalogEntry.id` of the model to reply with. `None`
             defers to `services/provider_router.py::ProviderResolver`'s
             persona-mode routing, then `Settings.default_model_id`.
+        image_model_id: `ImageCatalogEntry.id` to render with if this turn is
+            detected as an image request (see `services/image_intent.py`).
+            `None` defers to `Settings.default_image_model_id`.
+        video_model_id: `VideoCatalogEntry.id` to render with if this turn is
+            detected as a video request (see `services/video_intent.py`).
+            `None` defers to `Settings.default_video_model_id`.
     """
 
     messages: list[ChatMessage] = Field(min_length=1, max_length=_MAX_MESSAGES_PER_REQUEST)
     model_id: str | None = None
+    image_model_id: str | None = None
+    video_model_id: str | None = None
 
 
 class StreamChunkType(str, Enum):
@@ -60,6 +68,7 @@ class StreamChunkType(str, Enum):
 
     TOKEN = "token"
     IMAGE = "image"
+    VIDEO = "video"
     DONE = "done"
     ERROR = "error"
 
@@ -69,9 +78,11 @@ class StreamChunk(BaseModel):
 
     Attributes:
         type: Whether this chunk carries a text fragment, a generated image,
-            marks the end of the stream, or reports an error.
+            a generated video, marks the end of the stream, or reports an
+            error.
         content: Token text for TOKEN chunks, an image URL or
-            `data:image/...;base64,...` URI for IMAGE chunks, an error
+            `data:image/...;base64,...` URI for IMAGE chunks, a video URL or
+            `data:video/...;base64,...` URI for VIDEO chunks, an error
             message for ERROR chunks, and `None` for DONE chunks.
     """
 

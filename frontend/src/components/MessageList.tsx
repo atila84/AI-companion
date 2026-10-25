@@ -23,6 +23,9 @@ export function MessageList({ messages }: MessageListProps): React.JSX.Element {
           {message.imageUrl && (
             <img src={message.imageUrl} alt={message.content || "Generated image"} className="message-image" />
           )}
+          {message.videoUrl && (
+            <video src={message.videoUrl} controls className="message-video" />
+          )}
         </div>
       ))}
       <div ref={bottomRef} />

@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.services.image_providers.registry import ImageProviderId
 from src.services.providers.exceptions import ProviderConfigError
 from src.services.providers.registry import ProviderId
+from src.services.video_providers.registry import VideoProviderId
 
 
 class ModelCatalogEntry(BaseModel):
@@ -182,6 +183,14 @@ def _default_image_catalog() -> list[ImageCatalogEntry]:
             uncensored=True,
         ),
         ImageCatalogEntry(
+            id="pollinations/turbo",
+            provider_id=ImageProviderId.POLLINATIONS,
+            model="turbo",
+            display_name="Pollinations Turbo (free, uncensored)",
+            cost_tier="free",
+            uncensored=True,
+        ),
+        ImageCatalogEntry(
             id="automatic1111/sdxl",
             provider_id=ImageProviderId.AUTOMATIC1111,
             model="sdxl",
@@ -194,6 +203,60 @@ def _default_image_catalog() -> list[ImageCatalogEntry]:
             provider_id=ImageProviderId.OPENAI,
             model="dall-e-3",
             display_name="DALL-E 3 (via OpenAI)",
+            cost_tier="paid",
+        ),
+    ]
+
+
+class VideoCatalogEntry(BaseModel):
+    """One selectable (provider, model) pair for video generation.
+
+    Same shape as `ModelCatalogEntry`, for the video-generation catalog
+    consumed by `services/video_router.py::VideoProviderResolver`.
+
+    Attributes:
+        id: Stable identifier, e.g. `"comfyui/wan2.2"`.
+        provider_id: Which video provider factory handles this entry.
+        model: Backend-specific model string passed through to the SDK call.
+        display_name: Human-readable label (not yet surfaced in any UI).
+        cost_tier: Whether calling this model costs money.
+        uncensored: Whether this backend applies no built-in content filtering.
+        enabled: Allows disabling a catalog entry without deleting it.
+    """
+
+    id: str
+    provider_id: VideoProviderId
+    model: str
+    display_name: str
+    cost_tier: Literal["free", "paid"]
+    uncensored: bool = False
+    enabled: bool = True
+
+
+def _default_video_catalog() -> list[VideoCatalogEntry]:
+    """The initial hardcoded video-generation catalog.
+
+    Covers a free/uncensored local backend (a self-hosted ComfyUI server
+    running an open-weight model such as Wan 2.2 or HunyuanVideo) and a
+    paid/filtered backend (OpenAI's Sora). Unlike images, there is currently
+    no free *hosted* (no-setup) video tier known to be reliable enough to
+    hardcode here — add one if/when a provider like Pollinations ships a
+    documented video endpoint.
+    """
+    return [
+        VideoCatalogEntry(
+            id="comfyui/wan2.2",
+            provider_id=VideoProviderId.COMFYUI,
+            model="wan2.2",
+            display_name="Wan 2.2 (local, uncensored)",
+            cost_tier="free",
+            uncensored=True,
+        ),
+        VideoCatalogEntry(
+            id="openai/sora-2",
+            provider_id=VideoProviderId.OPENAI,
+            model="sora-2",
+            display_name="Sora 2 (via OpenAI)",
             cost_tier="paid",
         ),
     ]
@@ -233,6 +296,16 @@ class Settings(BaseSettings):
             needs no credentials, so image generation works out of the box.
         image_model_catalog: The full set of selectable image-generation
             (provider, model) pairs.
+        comfyui_base_url: Base URL of a local ComfyUI-compatible server
+            running an open-weight video model. `None` (the default)
+            disables the `comfyui` video catalog entry — like
+            `automatic1111_base_url`, a local server isn't assumed to be
+            running.
+        default_video_model_id: `VideoCatalogEntry.id` used for every
+            auto-detected video-generation turn (see `services/video_intent.py`
+            and `ChatService`).
+        video_model_catalog: The full set of selectable video-generation
+            (provider, model) pairs.
         cors_allow_origins: Origins allowed to call this API from a browser.
             Defaults to the local Vite dev server.
     """
@@ -251,6 +324,10 @@ class Settings(BaseSettings):
     automatic1111_base_url: str | None = None
     default_image_model_id: str = "pollinations/flux"
     image_model_catalog: list[ImageCatalogEntry] = Field(default_factory=_default_image_catalog)
+
+    comfyui_base_url: str | None = None
+    default_video_model_id: str = "comfyui/wan2.2"
+    video_model_catalog: list[VideoCatalogEntry] = Field(default_factory=_default_video_catalog)
 
     cors_allow_origins: list[str] = ["http://localhost:5173"]
 
@@ -331,6 +408,39 @@ class Settings(BaseSettings):
             if entry.id == model_id:
                 return entry
         raise ProviderConfigError(f"Unknown or disabled image model_id: {model_id!r}")
+
+    def _has_video_credentials(self, provider_id: VideoProviderId) -> bool:
+        """Whether the given video provider has what it needs to be called."""
+        if provider_id == VideoProviderId.COMFYUI:
+            return bool(self.comfyui_base_url)
+        if provider_id == VideoProviderId.OPENAI:
+            return bool(self.openai_api_key)
+        return False
+
+    def enabled_video_catalog(self) -> list[VideoCatalogEntry]:
+        """Video catalog entries that are both `enabled` and actually callable."""
+        return [
+            entry
+            for entry in self.video_model_catalog
+            if entry.enabled and self._has_video_credentials(entry.provider_id)
+        ]
+
+    def video_catalog_entry(self, model_id: str) -> VideoCatalogEntry:
+        """Look up an enabled video catalog entry by id.
+
+        Args:
+            model_id: A `VideoCatalogEntry.id`.
+
+        Returns:
+            The matching entry.
+
+        Raises:
+            ProviderConfigError: No enabled entry has this id.
+        """
+        for entry in self.enabled_video_catalog():
+            if entry.id == model_id:
+                return entry
+        raise ProviderConfigError(f"Unknown or disabled video model_id: {model_id!r}")
 
 
 @lru_cache

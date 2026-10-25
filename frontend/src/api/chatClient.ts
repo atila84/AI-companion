@@ -1,4 +1,12 @@
-import type { ChatMessage, ChatRequest, ModelCatalogEntry, StreamChunk } from "../types/chat";
+import type {
+  ChatMessage,
+  ChatRequest,
+  ImageCatalogEntry,
+  ModelCatalogEntry,
+  ModelSelection,
+  StreamChunk,
+  VideoCatalogEntry,
+} from "../types/chat";
 
 const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -16,6 +24,37 @@ export async function fetchModelCatalog(): Promise<ModelCatalogEntry[]> {
 }
 
 /**
+ * Fetch the catalog of models available for auto-detected image generation.
+ *
+ * Informational only — there is no per-request way to choose one of these
+ * yet, generation always uses the backend's configured default.
+ *
+ * @returns The enabled image-generation catalog entries.
+ */
+export async function fetchImageModelCatalog(): Promise<ImageCatalogEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/models/images`);
+  if (!response.ok) {
+    throw new Error(`Image model catalog request failed: ${response.status}`);
+  }
+  return (await response.json()) as ImageCatalogEntry[];
+}
+
+/**
+ * Fetch the catalog of models available for auto-detected video generation.
+ *
+ * Informational only — same caveat as `fetchImageModelCatalog`.
+ *
+ * @returns The enabled video-generation catalog entries.
+ */
+export async function fetchVideoModelCatalog(): Promise<VideoCatalogEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/models/videos`);
+  if (!response.ok) {
+    throw new Error(`Video model catalog request failed: ${response.status}`);
+  }
+  return (await response.json()) as VideoCatalogEntry[];
+}
+
+/**
  * Stream a companion reply for the given conversation.
  *
  * Uses `fetch` + a manually-parsed `ReadableStream` rather than `EventSource`,
@@ -23,20 +62,25 @@ export async function fetchModelCatalog(): Promise<ModelCatalogEntry[]> {
  * which `EventSource` cannot express.
  *
  * @param messages - Full conversation so far, ending with the latest user turn.
- * @param modelId - `ModelCatalogEntry.id` to reply with. Omit to let the
- *   backend fall back to persona-mode routing / its configured default.
+ * @param selection - Which backend to use per modality. Any omitted field
+ *   defers to the backend's own routing / configured default.
  * @param signal - Optional abort signal to cancel an in-flight generation.
  * @yields Each `StreamChunk` sent by the backend, in order.
  */
 export async function* streamChatReply(
   messages: ChatMessage[],
-  modelId?: string,
+  selection: ModelSelection = {},
   signal?: AbortSignal,
 ): AsyncGenerator<StreamChunk> {
   const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, model_id: modelId } satisfies ChatRequest),
+    body: JSON.stringify({
+      messages,
+      model_id: selection.modelId,
+      image_model_id: selection.imageModelId,
+      video_model_id: selection.videoModelId,
+    } satisfies ChatRequest),
     signal,
   });
 

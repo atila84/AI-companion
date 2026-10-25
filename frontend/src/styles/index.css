@@ -40,6 +40,43 @@ body {
   overflow: hidden;
 }
 
+.model-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 0.8rem;
+}
+
+.catalog-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.catalog-picker-label {
+  font-weight: 600;
+  color: #444;
+}
+
+.catalog-picker select {
+  max-width: 15rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: white;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.catalog-picker select:disabled {
+  background: #f0f0f0;
+  color: #999;
+  cursor: not-allowed;
+}
+
 .message-list {
   flex: 1;
   overflow-y: auto;
@@ -69,7 +106,8 @@ body {
   color: #1a1a1a;
 }
 
-.message-image {
+.message-image,
+.message-video {
   display: block;
   max-width: 100%;
   border-radius: 8px;

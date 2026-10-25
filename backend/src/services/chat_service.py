@@ -11,6 +11,9 @@ from src.services.providers.exceptions import ProviderError
 from src.services.safety.exceptions import SafetyInterventionError
 from src.services.safety.image_content_guard import ImageContentGuard
 from src.services.safety.uncensored_guard import UncensoredSafetyGuard
+from src.services.safety.video_content_guard import VideoContentGuard
+from src.services.video_intent import detect_video_prompt
+from src.services.video_router import VideoProviderResolver
 from src.utils.sse import format_sse
 
 
@@ -23,6 +26,8 @@ class ChatService:
         safety_guard: UncensoredSafetyGuard,
         image_resolver: ImageProviderResolver,
         image_content_guard: ImageContentGuard,
+        video_resolver: VideoProviderResolver,
+        video_content_guard: VideoContentGuard,
     ) -> None:
         """Initialize the service.
 
@@ -31,27 +36,34 @@ class ChatService:
                 and whether that provider is uncensored.
             safety_guard: Crisis-phrase check. `check_request` runs
                 unconditionally on every message before persona/provider
-                resolution and before the image-intent branch; `wrap_stream`
-                additionally scans the reply stream, but only when the
-                resolved provider is uncensored (see SPEC.md §5).
+                resolution and before the image/video-intent branches;
+                `wrap_stream` additionally scans the reply stream, but only
+                when the resolved provider is uncensored (see SPEC.md §5).
             image_resolver: Resolves an image-generation turn to a provider
                 and generation config.
             image_content_guard: Checks every image prompt against SPEC.md
                 §5's hard exclusion list unconditionally, plus the
                 companionship/intimate content-tier boundary when the
                 resolved provider is not uncensored.
+            video_resolver: Resolves a video-generation turn to a provider
+                and generation config. Mirrors `image_resolver`.
+            video_content_guard: Checks every video prompt the same way
+                `image_content_guard` checks image prompts.
         """
         self._resolver = resolver
         self._safety_guard = safety_guard
         self._image_resolver = image_resolver
         self._image_content_guard = image_content_guard
+        self._video_resolver = video_resolver
+        self._video_content_guard = video_content_guard
 
     async def stream_response(self, request: ChatRequest) -> AsyncIterator[str]:
         """Stream an SSE-framed companion reply for the given request.
 
         Args:
             request: The conversation to reply to, optionally naming a
-                `model_id`.
+                `model_id` and, for an auto-detected generation turn, an
+                `image_model_id` / `video_model_id`.
 
         Yields:
             SSE `data:` lines: zero or more TOKEN chunks, or exactly one
@@ -80,13 +92,23 @@ class ChatService:
             yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
             return
 
-        # Resolved before branching so image generation respects the same
-        # companionship/intimate content boundary as text, instead of always
-        # falling back to the uncensored image backend regardless of mode.
-        image_prompt = detect_image_prompt(request.messages[-1].content) if request.messages else None
+        # Resolved before branching so image/video generation respects the
+        # same companionship/intimate content boundary as text, instead of
+        # always falling back to the uncensored backend regardless of mode.
+        latest_message = request.messages[-1].content if request.messages else None
+
+        video_prompt = detect_video_prompt(latest_message) if latest_message else None
+        if video_prompt is not None:
+            async for event in self._stream_video_response(
+                latest_message, video_prompt, is_uncensored, request.video_model_id
+            ):
+                yield event
+            return
+
+        image_prompt = detect_image_prompt(latest_message) if latest_message else None
         if image_prompt is not None:
             async for event in self._stream_image_response(
-                request.messages[-1].content, image_prompt, is_uncensored
+                latest_message, image_prompt, is_uncensored, request.image_model_id
             ):
                 yield event
             return
@@ -109,7 +131,7 @@ class ChatService:
             yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
 
     async def _stream_image_response(
-        self, raw_message: str, prompt: str, is_uncensored: bool
+        self, raw_message: str, prompt: str, is_uncensored: bool, model_id: str | None
     ) -> AsyncIterator[str]:
         """Generate an image for `prompt` and stream it as SSE chunks.
 
@@ -125,6 +147,8 @@ class ChatService:
             is_uncensored: Whether this request resolved to an uncensored
                 text provider — gates the content-tier boundary check (SPEC.md
                 §5's hard exclusion list is checked regardless).
+            model_id: `ImageCatalogEntry.id` chosen by the client, or `None`
+                to fall back to `Settings.default_image_model_id`.
 
         Yields:
             One IMAGE chunk followed by one DONE chunk, or one ERROR chunk if
@@ -132,9 +156,32 @@ class ChatService:
         """
         try:
             self._image_content_guard.check_prompt(raw_message, is_uncensored)
-            provider, config = self._image_resolver.resolve()
+            provider, config = self._image_resolver.resolve(model_id)
             image_url = await provider.generate_image(prompt, config)
             yield format_sse(StreamChunk(type=StreamChunkType.IMAGE, content=image_url))
+            yield format_sse(StreamChunk(type=StreamChunkType.DONE))
+        except (ProviderError, SafetyInterventionError) as exc:
+            yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))
+
+    async def _stream_video_response(
+        self, raw_message: str, prompt: str, is_uncensored: bool, model_id: str | None
+    ) -> AsyncIterator[str]:
+        """Generate a video for `prompt` and stream it as SSE chunks.
+
+        Mirrors `_stream_image_response`. Args and behavior are the same,
+        substituting the video resolver/guard for the image ones; `model_id`
+        is a `VideoCatalogEntry.id`, or `None` for
+        `Settings.default_video_model_id`.
+
+        Yields:
+            One VIDEO chunk followed by one DONE chunk, or one ERROR chunk if
+            the content guard blocked the prompt or generation failed.
+        """
+        try:
+            self._video_content_guard.check_prompt(raw_message, is_uncensored)
+            provider, config = self._video_resolver.resolve(model_id)
+            video_url = await provider.generate_video(prompt, config)
+            yield format_sse(StreamChunk(type=StreamChunkType.VIDEO, content=video_url))
             yield format_sse(StreamChunk(type=StreamChunkType.DONE))
         except (ProviderError, SafetyInterventionError) as exc:
             yield format_sse(StreamChunk(type=StreamChunkType.ERROR, content=str(exc)))

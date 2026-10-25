@@ -143,3 +143,47 @@ async def test_stream_chat_rejects_malformed_body(app_module) -> None:
         app_module.dependency_overrides.pop(get_provider_resolver, None)
 
     assert response.status_code == 422
+
+
+async def _post_image_turn(app, image_model_id: str | None) -> httpx.Response:
+    """POST an image-intent turn, overriding only the *text* resolver.
+
+    The real `ImageProviderResolver` and `PollinationsProvider` run — the
+    latter only builds a URL string, so this exercises the whole chain
+    (request field -> ChatService -> resolver -> catalog -> provider) with no
+    mocking and no network I/O.
+    """
+    app.dependency_overrides[get_provider_resolver] = lambda: _FakeResolver(_FakeProvider())
+    try:
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            body: dict[str, object] = {"messages": [{"role": "user", "content": "draw me a cat"}]}
+            if image_model_id is not None:
+                body["image_model_id"] = image_model_id
+            return await client.post("/api/chat/stream", json=body)
+    finally:
+        app.dependency_overrides.pop(get_provider_resolver, None)
+
+
+async def test_selected_image_model_reaches_the_provider(app_module) -> None:
+    response = await _post_image_turn(app_module, "pollinations/turbo")
+
+    assert response.status_code == 200
+    assert '"type":"image"' in response.text
+    assert "model=turbo" in response.text
+
+
+async def test_omitted_image_model_falls_back_to_the_default(app_module) -> None:
+    response = await _post_image_turn(app_module, None)
+
+    assert response.status_code == 200
+    assert '"type":"image"' in response.text
+    assert "model=flux" in response.text
+
+
+async def test_unknown_image_model_returns_an_error_chunk(app_module) -> None:
+    response = await _post_image_turn(app_module, "nonexistent/model")
+
+    assert response.status_code == 200
+    assert '"type":"error"' in response.text
+    assert '"type":"image"' not in response.text
