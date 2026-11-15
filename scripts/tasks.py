@@ -34,11 +34,27 @@ TASKS_PATH = REPO_ROOT / "product" / "tasks.md"
 #: Rows look like: ``| S1.1.1 | As a developer, … | `TODO` |``
 #: Anchored to the line so prose tables elsewhere in the file are ignored.
 ROW_PATTERN = re.compile(
-    r"^\|\s*(?P<id>[SE]\d+(?:\.\d+)+)\s*\|\s*(?P<title>.+?)\s*\|\s*`(?P<status>[A-Z]+)`\s*\|$"
+    r"^\|\s*(?P<id>[SE]\d+(?:\.\d+)+)\s*\|\s*(?P<title>.+?)\s*\|"
+    r"\s*`(?P<status>[A-Z]+)`(?P<note>[^|]*)\|$"
 )
+
+#: Anything *shaped* like a story row. Compared against ROW_PATTERN so a row the
+#: strict parser silently skips is reported rather than quietly dropped -- a
+#: story invisible to the tooling is exactly the rot this module exists to stop.
+LOOSE_ROW_PATTERN = re.compile(r"^\|\s*[SE]\d+(?:\.\d+)+\s*\|")
 
 #: The legend line that defines which statuses are legal.
 LEGEND_PATTERN = re.compile(r"^\*\*Status key\*\*:\s*(?P<statuses>.+)$")
+
+#: Any story/epic reference inside free text, e.g. a commit message.
+STORY_PATTERN = re.compile(r"\b[SE]\d+(?:\.\d+)+\b")
+
+#: An explicit statement that a story is finished. "Done" is a judgement, so it
+#: is never inferred from a bare reference — only from one of these verbs.
+CLOSE_PATTERN = re.compile(
+    r"\b(?:close[sd]?|fixe[sd]?|fix|complete[sd]?|resolve[sd]?)\s+(?P<id>[SE]\d+(?:\.\d+)+)\b",
+    re.IGNORECASE,
+)
 
 #: Statuses that mean "not currently actionable".
 PARKED_STATUSES = frozenset({"BLOCKED", "DEFERRED", "DONE"})
@@ -182,13 +198,61 @@ def set_status(story_id: str, status: str, path: Path = TASKS_PATH) -> Story:
     story = find_story(parse_stories(lines), story_id)
     original = lines[story.line_no - 1]
     # Replace only the final status cell, preserving the rest of the row.
-    updated = re.sub(r"`[A-Z]+`(\s*\|)$", f"`{new_status}`\\1", original)
+    updated = re.sub(r"`[A-Z]+`([^|]*\|)$", f"`{new_status}`\\1", original)
     if updated == original and story.status != new_status:  # pragma: no cover - defensive
         raise BacklogError(f"Could not rewrite status on line {story.line_no}")
 
     lines[story.line_no - 1] = updated
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return Story(id=story.id, title=story.title, status=new_status, line_no=story.line_no)
+
+
+def advance_from_message(message: str, path: Path = TASKS_PATH) -> list[tuple[str, str, str]]:
+    """Advance story statuses implied by a commit message.
+
+    Two rules, both deliberately conservative:
+
+    - A story referenced at all moves `TODO` -> `WIP`. Committing against a
+      story is unambiguous evidence that work started.
+    - A story moves to `DONE` only when the message says so explicitly
+      ("closes S1.1.1", "fixes S1.1.1"). Finishing is a judgement no tool can
+      make, and a false `DONE` is worse than a stale `TODO`.
+
+    Anything already `BLOCKED` or `DEFERRED` is left alone — those are
+    deliberate states, not staleness.
+
+    Args:
+        message: Full commit message.
+        path: Backlog file to update.
+
+    Returns:
+        One `(id, old_status, new_status)` tuple per story actually changed.
+    """
+    try:
+        stories = parse_stories(read_lines(path))
+    except BacklogError:
+        return []
+
+    by_id = {s.id.upper(): s for s in stories}
+    closed = {m.group("id").upper() for m in CLOSE_PATTERN.finditer(message)}
+    referenced = {r.upper() for r in STORY_PATTERN.findall(message)}
+
+    changes: list[tuple[str, str, str]] = []
+    for story_id in sorted(referenced):
+        story = by_id.get(story_id)
+        if story is None:
+            continue
+        if story_id in closed:
+            target = "DONE"
+        elif story.status == "TODO":
+            target = "WIP"
+        else:
+            continue
+        if story.status == target:
+            continue
+        set_status(story.id, target, path=path)
+        changes.append((story.id, story.status, target))
+    return changes
 
 
 def internal_links(doc: Path) -> list[str]:
@@ -220,6 +284,14 @@ def validate(path: Path = TASKS_PATH) -> list[str]:
 
     if not stories:
         problems.append("No story rows parsed — the table format may be broken")
+
+    parsed_lines = {s.line_no for s in stories}
+    for index, line in enumerate(lines, start=1):
+        if LOOSE_ROW_PATTERN.match(line) and index not in parsed_lines:
+            problems.append(
+                f"Line {index}: looks like a story row but did not parse, so it is "
+                f"invisible to the backlog tooling: {line.strip()[:70]}"
+            )
 
     seen: dict[str, int] = {}
     for story in stories:

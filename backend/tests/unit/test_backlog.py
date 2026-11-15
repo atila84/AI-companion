@@ -131,3 +131,129 @@ def test_validate_detects_a_broken_table(tmp_path: Path) -> None:
     problems = tasks.validate(path=copy)
 
     assert any("No story rows parsed" in p for p in problems), problems
+
+
+# --- automatic status advancement from commit messages -------------------------
+
+
+@pytest.fixture
+def backlog_copy(tmp_path: Path) -> Path:
+    copy = tmp_path / "tasks.md"
+    shutil.copy(tasks.TASKS_PATH, copy)
+    return copy
+
+
+def _status(path: Path, story_id: str) -> str:
+    return tasks.find_story(tasks.parse_stories(tasks.read_lines(path)), story_id).status
+
+
+def test_reference_moves_todo_to_wip(backlog_copy: Path) -> None:
+    """Committing against a story is unambiguous evidence work started."""
+    changes = tasks.advance_from_message("feat: add Postgres (S1.1.1)", path=backlog_copy)
+
+    assert changes == [("S1.1.1", "TODO", "WIP")]
+    assert _status(backlog_copy, "S1.1.1") == "WIP"
+
+
+def test_close_keyword_moves_to_done(backlog_copy: Path) -> None:
+    changes = tasks.advance_from_message("feat: add Postgres, closes S1.1.1", path=backlog_copy)
+
+    assert changes == [("S1.1.1", "TODO", "DONE")]
+    assert _status(backlog_copy, "S1.1.1") == "DONE"
+
+
+@pytest.mark.parametrize("verb", ["closes", "Closed", "fixes", "fix", "completes", "resolved"])
+def test_close_verbs_are_recognised(verb: str, backlog_copy: Path) -> None:
+    tasks.advance_from_message(f"work: {verb} S1.1.2", path=backlog_copy)
+
+    assert _status(backlog_copy, "S1.1.2") == "DONE"
+
+
+def test_bare_reference_never_marks_done(backlog_copy: Path) -> None:
+    """A false DONE is worse than a stale TODO — never infer completion."""
+    tasks.advance_from_message("wip: first pass at S1.1.1", path=backlog_copy)
+
+    assert _status(backlog_copy, "S1.1.1") == "WIP"
+
+
+def test_blocked_and_deferred_are_left_alone(backlog_copy: Path) -> None:
+    """Those are deliberate states, not staleness."""
+    tasks.set_status("S4.1.1", "BLOCKED", path=backlog_copy)
+
+    changes = tasks.advance_from_message("chore: poke S4.1.1", path=backlog_copy)
+
+    assert changes == []
+    assert _status(backlog_copy, "S4.1.1") == "BLOCKED"
+
+
+def test_already_done_is_not_rewritten(backlog_copy: Path) -> None:
+    changes = tasks.advance_from_message("chore: note E0.1", path=backlog_copy)
+
+    assert changes == []
+
+
+def test_unknown_ids_are_ignored(backlog_copy: Path) -> None:
+    before = backlog_copy.read_text(encoding="utf-8")
+
+    assert tasks.advance_from_message("feat: thing (S99.99.99)", path=backlog_copy) == []
+    assert backlog_copy.read_text(encoding="utf-8") == before
+
+
+def test_message_with_no_reference_changes_nothing(backlog_copy: Path) -> None:
+    before = backlog_copy.read_text(encoding="utf-8")
+
+    assert tasks.advance_from_message("docs: tidy readme", path=backlog_copy) == []
+    assert backlog_copy.read_text(encoding="utf-8") == before
+
+
+def test_multiple_stories_in_one_message(backlog_copy: Path) -> None:
+    changes = tasks.advance_from_message(
+        "feat: groundwork for S1.1.2, closes S1.1.1", path=backlog_copy
+    )
+
+    assert dict((c[0], c[2]) for c in changes) == {"S1.1.1": "DONE", "S1.1.2": "WIP"}
+
+
+# --- regression: rows with a trailing note after the status --------------------
+
+
+def test_row_with_trailing_note_parses(stories: list[tasks.Story]) -> None:
+    """Regression: `| S4.1.1 | ... | `BLOCKED` — external lead time |` was silently
+    skipped by a stricter pattern, making the story invisible to the tooling."""
+    story = tasks.find_story(stories, "S4.1.1")
+
+    assert story.status == "BLOCKED"
+
+
+def test_every_row_shaped_like_a_story_actually_parses(lines: list[str]) -> None:
+    """The dangerous failure is a row the parser skips without complaint."""
+    parsed = {s.line_no for s in tasks.parse_stories(lines)}
+    missed = [
+        f"line {i}: {line.strip()[:60]}"
+        for i, line in enumerate(lines, start=1)
+        if tasks.LOOSE_ROW_PATTERN.match(line) and i not in parsed
+    ]
+
+    assert not missed, f"Rows invisible to the tooling: {missed}"
+
+
+def test_set_status_preserves_a_trailing_note(backlog_copy: Path) -> None:
+    tasks.set_status("S4.1.1", "WIP", path=backlog_copy)
+
+    row = next(l for l in tasks.read_lines(backlog_copy) if l.startswith("| S4.1.1 "))
+    assert "`WIP`" in row
+    assert "external lead time" in row, "the trailing note was destroyed"
+
+
+def test_validate_reports_a_row_it_cannot_parse(tmp_path: Path) -> None:
+    copy = tmp_path / "tasks.md"
+    copy.write_text(
+        "**Status key**: `TODO` · `DONE`\n\n"
+        "| S1.1.1 | fine | `TODO` |\n"
+        "| S1.1.2 | status cell is malformed | TODO |\n",
+        encoding="utf-8",
+    )
+
+    problems = tasks.validate(path=copy)
+
+    assert any("did not parse" in p for p in problems), problems

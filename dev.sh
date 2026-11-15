@@ -21,6 +21,14 @@ check_port() {
   fi
 }
 
+# Git refuses to run hooks from a fresh clone on its own -- that would make
+# `git clone` remote code execution -- so core.hooksPath is local config that
+# has to be set once per clone. Doing it here means nobody has to remember.
+if [ "$(git -C "$ROOT_DIR" config --get core.hooksPath || true)" != "scripts/hooks" ]; then
+  git -C "$ROOT_DIR" config core.hooksPath scripts/hooks
+  echo "Enabled repo git hooks (backlog checks). See README.md."
+fi
+
 check_port 8000 backend
 check_port 5173 frontend
 

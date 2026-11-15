@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Advance backlog status from the commit that just landed.
+
+Closes most of the "you still have to remember to run `set`" gap:
+
+- A referenced story moves `TODO` -> `WIP` automatically.
+- A story moves to `DONE` only when the message says so ("closes S1.1.1").
+
+The update is written and **staged**, not amended into the commit. Amending
+from a hook rewrites history and misbehaves during rebases and cherry-picks;
+staging is predictable and visible in `git status`, and rides along with the
+next commit.
+
+Stdlib only — git hooks run with a bare environment.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from tasks import TASKS_PATH, advance_from_message  # noqa: E402
+
+#: Git state files meaning a multi-commit operation is in flight. Touching the
+#: working tree during one of these causes conflicts and confusion.
+IN_FLIGHT = ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD")
+
+
+def git_dir() -> Path:
+    """Return the repository's git directory."""
+    out = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return (REPO_ROOT / out).resolve()
+
+
+def main() -> int:
+    """Advance any statuses implied by HEAD's message.
+
+    Returns:
+        Always 0 — a bookkeeping failure must never fail a commit that already
+        succeeded.
+    """
+    try:
+        gd = git_dir()
+        if any((gd / marker).exists() for marker in IN_FLIGHT):
+            return 0  # mid-rebase/merge: stay out of the way
+
+        message = subprocess.run(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+        changes = advance_from_message(message)
+        if not changes:
+            return 0
+
+        subprocess.run(["git", "add", str(TASKS_PATH)], cwd=REPO_ROOT, check=True)
+        for story_id, old, new in changes:
+            print(f"backlog: {story_id} {old} -> {new}")
+        print("backlog: staged product/tasks.md (included in your next commit)")
+    except Exception as exc:  # noqa: BLE001 - never break a completed commit
+        print(f"backlog: skipped status update ({exc})", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
