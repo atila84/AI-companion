@@ -147,33 +147,50 @@ def _status(path: Path, story_id: str) -> str:
     return tasks.find_story(tasks.parse_stories(tasks.read_lines(path)), story_id).status
 
 
+def _a_todo(path: Path) -> str:
+    """Any story currently TODO.
+
+    Picked dynamically: hardcoding an id couples the test to the live backlog's
+    current state, which the post-commit hook changes underneath it.
+    """
+    return next(s.id for s in tasks.parse_stories(tasks.read_lines(path)) if s.status == "TODO")
+
+
 def test_reference_moves_todo_to_wip(backlog_copy: Path) -> None:
     """Committing against a story is unambiguous evidence work started."""
-    changes = tasks.advance_from_message("feat: add Postgres (S1.1.1)", path=backlog_copy)
+    story_id = _a_todo(backlog_copy)
 
-    assert changes == [("S1.1.1", "TODO", "WIP")]
-    assert _status(backlog_copy, "S1.1.1") == "WIP"
+    changes = tasks.advance_from_message(f"feat: add thing ({story_id})", path=backlog_copy)
+
+    assert changes == [(story_id, "TODO", "WIP")]
+    assert _status(backlog_copy, story_id) == "WIP"
 
 
 def test_close_keyword_moves_to_done(backlog_copy: Path) -> None:
-    changes = tasks.advance_from_message("feat: add Postgres, closes S1.1.1", path=backlog_copy)
+    story_id = _a_todo(backlog_copy)
 
-    assert changes == [("S1.1.1", "TODO", "DONE")]
-    assert _status(backlog_copy, "S1.1.1") == "DONE"
+    changes = tasks.advance_from_message(f"feat: add thing, closes {story_id}", path=backlog_copy)
+
+    assert changes == [(story_id, "TODO", "DONE")]
+    assert _status(backlog_copy, story_id) == "DONE"
 
 
 @pytest.mark.parametrize("verb", ["closes", "Closed", "fixes", "fix", "completes", "resolved"])
 def test_close_verbs_are_recognised(verb: str, backlog_copy: Path) -> None:
-    tasks.advance_from_message(f"work: {verb} S1.1.2", path=backlog_copy)
+    story_id = _a_todo(backlog_copy)
 
-    assert _status(backlog_copy, "S1.1.2") == "DONE"
+    tasks.advance_from_message(f"work: {verb} {story_id}", path=backlog_copy)
+
+    assert _status(backlog_copy, story_id) == "DONE"
 
 
 def test_bare_reference_never_marks_done(backlog_copy: Path) -> None:
     """A false DONE is worse than a stale TODO — never infer completion."""
-    tasks.advance_from_message("wip: first pass at S1.1.1", path=backlog_copy)
+    story_id = _a_todo(backlog_copy)
 
-    assert _status(backlog_copy, "S1.1.1") == "WIP"
+    tasks.advance_from_message(f"wip: first pass at {story_id}", path=backlog_copy)
+
+    assert _status(backlog_copy, story_id) == "WIP"
 
 
 def test_blocked_and_deferred_are_left_alone(backlog_copy: Path) -> None:
@@ -207,11 +224,14 @@ def test_message_with_no_reference_changes_nothing(backlog_copy: Path) -> None:
 
 
 def test_multiple_stories_in_one_message(backlog_copy: Path) -> None:
+    todos = [s.id for s in tasks.parse_stories(tasks.read_lines(backlog_copy)) if s.status == "TODO"]
+    first, second = todos[0], todos[1]
+
     changes = tasks.advance_from_message(
-        "feat: groundwork for S1.1.2, closes S1.1.1", path=backlog_copy
+        f"feat: groundwork for {second}, closes {first}", path=backlog_copy
     )
 
-    assert dict((c[0], c[2]) for c in changes) == {"S1.1.1": "DONE", "S1.1.2": "WIP"}
+    assert dict((c[0], c[2]) for c in changes) == {first: "DONE", second: "WIP"}
 
 
 # --- regression: rows with a trailing note after the status --------------------

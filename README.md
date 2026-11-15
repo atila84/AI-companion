@@ -59,7 +59,22 @@ Nothing updates the backlog by itself. These make it cheap to keep honest:
 | `tasks.py list --status TODO --epic 1` | Filtered view |
 | `tasks.py set S1.1.1 DONE` | Change status (rewrites one line) |
 | `tasks.py check` | Validate ids, statuses and doc links |
-| `tasks.py install-hooks` | Enable the commit-msg hook (once per clone) |
+| `tasks.py install-hooks` | Enable the git hooks (`dev.sh` does this for you) |
+
+**Status mostly maintains itself.** The `post-commit` hook reads the commit message and:
+
+- moves a referenced story `TODO` → `WIP` — committing against a story means work started
+- moves it to `DONE` only when you say so explicitly: `closes S1.1.1`, `fixes S1.1.1`
+
+`BLOCKED` and `DEFERRED` are never touched — those are deliberate, not stale. The updated
+`tasks.md` is **staged, not amended**, so it rides along with your next commit; amending from
+a hook rewrites history and breaks rebases.
+
+The flip side: mentioning a story id in an unrelated commit will advance it. Use a
+`docs:`/`chore:` prefix or `[no-story]` when you are not actually working on it.
+
+`DONE` is the one thing left to you, deliberately — no tool can know you consider work
+finished, and a false `DONE` is worse than a stale `TODO`.
 
 `backend/tests/unit/test_backlog.py` runs the same validations in the normal suite, so a
 broken table or a renamed document fails CI rather than rotting quietly.

@@ -18,9 +18,13 @@ Read these first — they are the source of truth for what to build and why:
 - **`product/tasks.md`** — the backlog (epics → stories → tasks with acceptance criteria).
   Find the story you're working on. If there isn't one, add it before writing code.
   - `python3 scripts/tasks.py next` — the next actionable story
-  - `python3 scripts/tasks.py set <id> DONE` — **when the work lands**, as part of the task.
-    Nothing updates this automatically; `set` is the supported way (it rewrites exactly one
-    line, so the diff stays reviewable).
+  - Status advances itself: the `post-commit` hook moves a referenced story `TODO` → `WIP`,
+    and to `DONE` when the message says `closes <id>` / `fixes <id>`. So finish a story by
+    writing `closes S1.1.1` in the commit rather than editing the file.
+  - `python3 scripts/tasks.py set <id> <STATUS>` for anything the hook won't infer
+    (`BLOCKED`, `DEFERRED`, or correcting a mistake). It rewrites exactly one line.
+  - Don't reference a story id in a commit that isn't about it — that advances it. Use a
+    `docs:`/`chore:` prefix or `[no-story]`.
   - Commit messages must reference the story id, e.g. `feat: add Postgres (S1.1.1)`. The
     `commit-msg` hook rejects messages without one; `docs:`/`chore:` and `[no-story]` are
     the exemptions.
