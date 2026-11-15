@@ -17,6 +17,13 @@ Read these first — they are the source of truth for what to build and why:
 
 - **`product/tasks.md`** — the backlog (epics → stories → tasks with acceptance criteria).
   Find the story you're working on. If there isn't one, add it before writing code.
+  - `python3 scripts/tasks.py next` — the next actionable story
+  - `python3 scripts/tasks.py set <id> DONE` — **when the work lands**, as part of the task.
+    Nothing updates this automatically; `set` is the supported way (it rewrites exactly one
+    line, so the diff stays reviewable).
+  - Commit messages must reference the story id, e.g. `feat: add Postgres (S1.1.1)`. The
+    `commit-msg` hook rejects messages without one; `docs:`/`chore:` and `[no-story]` are
+    the exemptions.
 - **`product/product.md`** — feature design, the memory subsystem, data model, API surface
   and non-functional requirements.
 - **`VISION.md`** — business constraints. Consult it whenever work touches cost, pricing,

@@ -11,6 +11,10 @@
 
 **Status key**: `TODO` · `WIP` · `DONE` · `BLOCKED` · `DEFERRED`
 
+This legend is authoritative — `scripts/tasks.py` parses it, so adding a status here is
+enough. Change a story's status with `python3 scripts/tasks.py set <id> <STATUS>` rather than
+editing by hand; `tasks.py check` and the test suite validate the result.
+
 ---
 
 ## Epic 0 — Already shipped

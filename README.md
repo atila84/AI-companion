@@ -9,7 +9,9 @@ all work. There is **no database, no authentication, no persistence, and one har
 persona** — see [`product/tasks.md`](product/tasks.md) Epic 0 for exactly what exists.
 
 ```bash
-./dev.sh          # both servers, with setup checks
+./dev.sh                                  # both servers, with setup checks
+python3 scripts/tasks.py install-hooks    # once per clone — enables the commit-msg hook
+python3 scripts/tasks.py next             # what to work on
 ```
 
 Full setup, including optional local video generation, is in [`USAGE.md`](USAGE.md).
@@ -35,16 +37,32 @@ gets updated in the same change rather than left to rot.
 
 Every task:
 
-1. **Start in [`product/tasks.md`](product/tasks.md).** Find the story. If there isn't one,
-   add it before writing code — work that isn't in the backlog isn't prioritised against
-   anything.
+1. **Start in [`product/tasks.md`](product/tasks.md)** — `python3 scripts/tasks.py next`.
+   If there's no story for the work, add one before writing code; work that isn't in the
+   backlog isn't prioritised against anything.
 2. **Check [`product/product.md`](product/product.md)** for the design and acceptance
    criteria, and [`VISION.md`](VISION.md) if the work affects cost, compliance or pricing.
 3. **Follow [`CLAUDE.md`](CLAUDE.md)** — Pydantic v2 across boundaries, full type
    annotations, Google-style docstrings, tests for happy path and failure modes.
-4. **Update the story status** and reference its id in the commit message.
+4. **Update the story status** with `python3 scripts/tasks.py set <id> DONE`, and reference
+   the id in the commit message — the `commit-msg` hook enforces the latter.
 5. **If the work contradicts a document, change the document.** A spec that disagrees with
    the code is worse than no spec.
+
+### Backlog tooling
+
+Nothing updates the backlog by itself. These make it cheap to keep honest:
+
+| Command | Does |
+|---|---|
+| `tasks.py next` | Next actionable story |
+| `tasks.py list --status TODO --epic 1` | Filtered view |
+| `tasks.py set S1.1.1 DONE` | Change status (rewrites one line) |
+| `tasks.py check` | Validate ids, statuses and doc links |
+| `tasks.py install-hooks` | Enable the commit-msg hook (once per clone) |
+
+`backend/tests/unit/test_backlog.py` runs the same validations in the normal suite, so a
+broken table or a renamed document fails CI rather than rotting quietly.
 
 ### Three constraints that are easy to break by accident
 

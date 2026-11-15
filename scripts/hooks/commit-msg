@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Require commit messages to reference a backlog story.
+
+Enabled with `python3 scripts/tasks.py install-hooks`, which points
+`core.hooksPath` here. Living in the repo rather than `.git/hooks/` means it is
+version-controlled and governs every commit — Claude's and hand-typed alike.
+
+Stdlib only: git hooks run with a bare environment and a fresh clone has no
+`backend/.venv`.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tasks import BacklogError, parse_stories, read_lines  # noqa: E402
+
+STORY_PATTERN = re.compile(r"\b[SE]\d+(?:\.\d+)+\b")
+
+#: Prefixes that legitimately have no story: tooling, docs and git's own commits.
+EXEMPT_PREFIXES = ("docs:", "chore:", "merge ", "revert ", "fixup!", "squash!")
+
+#: Explicit opt-out for the genuine one-off.
+ESCAPE_HATCH = "[no-story]"
+
+
+def main() -> int:
+    """Validate the pending commit message.
+
+    Returns:
+        0 to accept the commit, 1 to reject it.
+    """
+    message = Path(sys.argv[1]).read_text(encoding="utf-8")
+    # Ignore comment lines git appends to the template.
+    body = "\n".join(l for l in message.splitlines() if not l.startswith("#")).strip()
+    lowered = body.lower()
+
+    if ESCAPE_HATCH in lowered or lowered.startswith(EXEMPT_PREFIXES):
+        return 0
+
+    referenced = STORY_PATTERN.findall(body)
+    if not referenced:
+        print("commit rejected: no backlog story referenced.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  Add the story id, e.g.  feat: add Postgres (S1.1.1)", file=sys.stderr)
+        print("  Find the next one with  python3 scripts/tasks.py next", file=sys.stderr)
+        print(f"  Genuinely unrelated?    add {ESCAPE_HATCH} to the message", file=sys.stderr)
+        return 1
+
+    # A referenced id that does not exist is almost always a typo.
+    try:
+        known = {s.id for s in parse_stories(read_lines())}
+    except BacklogError:
+        return 0  # Backlog unreadable mid-rebase: don't block the commit.
+
+    unknown = [r for r in referenced if r.upper() not in known]
+    if unknown:
+        print(f"commit rejected: unknown story id(s): {', '.join(unknown)}", file=sys.stderr)
+        print("  python3 scripts/tasks.py list", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
