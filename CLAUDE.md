@@ -56,6 +56,26 @@ The single most important constraint in this codebase (SPEC.md §2): **no code o
   work). `Settings.enabled_catalog()` filters out entries whose provider lacks credentials, so the API/UI
   never offer a model that would fail on first use.
 
+### Media generation — the same seam, once per modality
+
+Image and video generation mirror the text provider stack rather than extending it, because
+generation is single-shot while chat is streamed:
+
+- `services/image_providers/base.py::ImageGenerationProvider.generate_image(prompt, config) -> str`
+  and `services/video_providers/base.py::VideoGenerationProvider.generate_video(...)`.
+- Each has its own registry (Factory + Strategy, same dumb-dict shape as
+  `services/providers/registry.py`) and its own credential-gated catalog in `config.py`
+  (`enabled_image_catalog()` / `enabled_video_catalog()`).
+- Each has a resolver — `services/image_router.py`, `services/video_router.py` — taking an
+  optional `model_id` from the request, falling back to the configured default.
+- There is deliberately **no "generate image" button**: intent is inferred from the message
+  text by `services/image_intent.py` / `services/video_intent.py`, and `ChatService` branches
+  to the media path before calling any LLM.
+- Adding a backend means one new provider subclass plus one registry entry — no other call
+  site changes. `ComfyUIVideoProvider` is the exception worth reading first: it speaks
+  ComfyUI's real three-step API (submit graph, poll, fetch) and runs a user-exported workflow
+  with a `{prompt}` placeholder, because workflow graphs differ per model and per version.
+
 ### Persona / system prompt layer
 
 `personas/base.py` is a placeholder for the full per-user/starter/custom persona system in SPEC.md §3.
@@ -75,11 +95,19 @@ accumulating output stream (`wrap_stream`), raising `SafetyInterventionError` on
 match. Currently keyword-based by design (placeholder for a classifier — see the module docstring); keep
 new trigger logic in this module rather than scattering checks elsewhere.
 
+`services/safety/image_content_guard.py` and `video_content_guard.py` are the media
+counterparts, and differ in one important way: they run on **every** generation prompt
+regardless of backend, because image/video generation has no LLM in the loop to self-moderate.
+They are gated on the resolved *text* provider's `is_uncensored`, so picking an uncensored
+image backend never widens what the conversation's mode allows.
+
 ### Streaming
 
 Chat replies stream via SSE. `ChatService.stream_response` yields SSE-framed `StreamChunk`s
 (`utils/sse.py::format_sse`): zero-or-more `TOKEN` chunks, then exactly one `DONE`, or one `ERROR` if
-generation/safety-check fails mid-stream. The frontend (`api/chatClient.ts`) deliberately uses `fetch` +
+generation/safety-check fails mid-stream. A media turn instead yields exactly one `IMAGE` or
+`VIDEO` chunk (a URL or `data:` URI) followed by `DONE` — the frontend renders these as `<img>`
+/ `<video>` and strips them from the history it resends. The frontend (`api/chatClient.ts`) deliberately uses `fetch` +
 manual `ReadableStream` parsing instead of `EventSource`, since the request needs a POST body
 (conversation history) that `EventSource` can't express.
 

@@ -6,7 +6,10 @@ Companion source-of-truth spec. Resolves the TBDs left open in `VISION.md`. This
 
 - Multi-mode AI companion: **companionship/emotional support**, **roleplay & interactive fiction**, and **romantic/sexual/intimate**.
 - One companion per user in v1 — a persona (starter or custom), a mode, and the memory/relationship state attached to it.
-- Text chat only. Web app, responsive, no native mobile in v1.
+- Text chat, plus in-conversation **image and video generation** (added 2026-11-16 — see
+  `VISION.md` §1, where this is the primary differentiator). Web app, responsive, no native
+  mobile in v1 — and note that app stores are not an available channel at all for the
+  intimate tier (`VISION.md` §4.2).
 - Somewhere accessible (About/Terms page), it must be clearly disclosed that this is an AI, not a person. This is non-negotiable and ships in v1.
 
 ## 2. Architecture
@@ -26,6 +29,22 @@ The single most important architectural constraint: **no code outside the provid
   - **Claude (Anthropic API)** — default for companionship and roleplay modes.
   - **Hosted open-model API** (e.g. OpenRouter or Featherless.ai style provider serving an uncensored/RP-tuned open-weight model) — used for the romantic/sexual/intimate mode, where explicit sexual content is permitted and Claude will refuse.
 - **Routing is user-selectable per mode**: each user can choose which backend powers each of their modes (with sane defaults as above), and swap it in settings. The interface is designed so adding a self-hosted vLLM endpoint or a user's own bring-your-own-key/endpoint later is a new implementation of the same interface, not a new code path.
+### Media generation providers
+
+The same seam, repeated per modality rather than overloaded onto one interface. Media
+generation is single-shot rather than streamed, so it gets its own interfaces:
+
+- `ImageGenerationProvider.generate_image(prompt, config) -> str`
+  (`services/image_providers/`), resolved by `services/image_router.py`.
+- `VideoGenerationProvider.generate_video(prompt, config) -> str`
+  (`services/video_providers/`), resolved by `services/video_router.py`.
+- Each has its own registry and credential-gated catalog, mirroring
+  `services/providers/registry.py`. Intent is inferred from the message text
+  (`services/image_intent.py`, `services/video_intent.py`) rather than exposed as a button.
+- Self-hosted generation *is* viable here, unlike text: a local ComfyUI server covers the
+  free/uncensored tier at zero marginal cost (see `USAGE.md`). The rejection below applies to
+  text inference, not media.
+
 - Self-hosting your own GPU inference was considered and explicitly rejected for v1: a dedicated GPU box runs whether or not it's used (~$700–1500+/mo), and hosted inference APIs bill per token, matching unknown v1 traffic far better. Revisit self-hosting only if usage volume makes the economics flip.
 
 ## 3. Modes & Personas
@@ -66,6 +85,13 @@ Enforced at the system/application level, above every persona and every backend,
 
 This is an application-layer rule (checked/enforced in code and system prompts the persona can't touch), not something delegated to model behavior.
 
+For **generated media** the same list is enforced by `services/safety/image_content_guard.py`
+and `services/safety/video_content_guard.py`. These run on every generation prompt regardless
+of backend — image and video generation have no LLM in the loop to apply contextual judgment,
+so the application layer does all the work. They also enforce the content-tier boundary below,
+gated on whether the resolved *text* provider is uncensored: choosing an uncensored image
+backend must not widen what the conversation's mode permits.
+
 ### Content tiers
 - Companionship / roleplay modes: whatever Claude will natively produce under normal use — no explicit sexual content.
 - Romantic/sexual/intimate mode: explicit sexual content permitted for verified-adult users (see §6), subject to the hard exclusion list above.
@@ -73,7 +99,13 @@ This is an application-layer rule (checked/enforced in code and system prompts t
 ## 6. Access Control
 
 - **Auth**: email + password, with Google OAuth as an alternative sign-up/login path.
-- **Age gating**: self-attestation only in v1 — a checkbox/DOB entry gates access to the romantic/sexual/intimate mode. No third-party ID verification integration in v1; this is an explicit, flagged gap (see §10), not a permanent design decision.
+- **Age gating**: ⚠️ **superseded 2026-11-16 — see `VISION.md` §4.3.** This spec originally
+  called for self-attestation only. That is no longer defensible: 26 US states require real
+  age verification for adult content, regulators have stated explicitly that a self-declared
+  tickbox does not qualify, and Ofcom opened an investigation into a competing AI companion
+  service (Joi.com) over age assurance on 15 Jan 2026. Real age verification is a v1 blocker
+  for the intimate tier, applied at the point of entering that tier rather than at signup.
+  Keep it behind one isolated interface so the vendor can be swapped.
 
 ## 7. Data Handling
 
@@ -99,7 +131,7 @@ Each item below is deferred, not designed against — the architecture should no
 | Deferred | Note |
 |---|---|
 | Digital pet mode | Present in the original vision but cut from v1 scope. If added later, treat as a genuinely separate feature (own data model, stat-decay background job) rather than a persona skin on an existing mode. |
-| Voice, avatar/video | Text-only chat interface for v1; provider interface doesn't preclude adding a TTS/avatar layer later. |
+| Voice, avatar | Voice and animated avatars remain deferred; the provider interface doesn't preclude a TTS layer later. **Video generation is no longer deferred — it shipped 2026-11-16** (§2). |
 | Multiple simultaneous companions per user | Data model shouldn't hard-code a single-companion assumption at the schema level even though the UI only supports one in v1. |
 | Payments/subscriptions | No billing in v1; usage tracking (§9) lays groundwork for tiering later if needed. |
 | Native mobile apps | Web-only, responsive. API-first backend means a native client can consume the same API later. |
