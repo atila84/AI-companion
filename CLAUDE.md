@@ -11,6 +11,26 @@ v1 spec — read this first for anything touching personas, memory, safety, or a
 is the superseded rough draft kept for historical context only. `USAGE.md` has local setup/run/troubleshooting
 instructions — don't duplicate them here, refer to that file.
 
+## Before any task
+
+Read these first — they are the source of truth for what to build and why:
+
+- **`product/tasks.md`** — the backlog (epics → stories → tasks with acceptance criteria).
+  Find the story you're working on. If there isn't one, add it before writing code.
+- **`product/product.md`** — feature design, the memory subsystem, data model, API surface
+  and non-functional requirements.
+- **`VISION.md`** — business constraints. Consult it whenever work touches cost, pricing,
+  compliance or distribution; several technical decisions exist for commercial reasons that
+  are not obvious from the code.
+
+`SPEC.md` remains the authoritative v1 technical spec for personas, memory, safety and
+access control. Where documents disagree, the most recent dated decision wins — and update
+the losing document in the same change.
+
+Three constraints that are easy to break by accident: the provider seam (below), the
+un-overridable persona prefix (`SPEC.md` §3), and per-user cost tracking (`VISION.md` §5 —
+margin inverts at ~6× median usage, so anything that generates should record a usage event).
+
 ## Lessons
 [Here claude code will write learned lessons for each session if any. Lessons are things that might usefull in the feature]
 
