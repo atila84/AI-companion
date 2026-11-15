@@ -95,24 +95,41 @@ corrupted output on M4 specifically (ComfyUI issue #15793).
 cd ~/ComfyUI
 curl -L -o models/checkpoints/ltx-video-2b-v0.9.safetensors \
   "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors"
-curl -L -o models/text_encoders/t5xxl_fp8_e4m3fn.safetensors \
-  "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors"
+curl -L -o models/text_encoders/t5xxl_fp16.safetensors \
+  "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
 ```
 
-That's ~13GB. The `fp8` text encoder is deliberate — the `fp16` one is ~9.8GB and too much
-memory pressure on a 24GB machine.
+That's ~18GB. **Use the `fp16` text encoder, not `fp8`.** Metal cannot represent float8 at
+all (`RuntimeError: Undefined type Float8_e4m3fn`), and fp16 is the combination actually
+verified working here.
 
 ### 3. Generate once in the GUI first
 
 ```bash
-cd ~/ComfyUI && .venv/bin/python main.py
+cd ~/ComfyUI && .venv/bin/python main.py --cpu-vae
 ```
+
+**`--cpu-vae` is required on Apple Silicon, not optional.** PyTorch's Metal backend has a
+broken `conv3d` kernel: it silently returns all zeros instead of erroring. LTX's VideoVAE is
+a 3D causal VAE built on conv3d, so without this flag every frame decodes to uniform grey
+while ComfyUI cheerfully reports success. Verify it yourself:
+
+```bash
+~/ComfyUI/.venv/bin/python -c "
+import torch
+x=torch.randn(1,4,5,16,16); w=torch.randn(8,4,3,3,3)*0.1
+print('cpu  std:', torch.nn.functional.conv3d(x,w,padding=1).std().item())
+print('mps  std:', torch.nn.functional.conv3d(x.to('mps'),w.to('mps'),padding=1).std().item())
+"
+```
+
+A non-zero CPU std and a 0.0 MPS std confirms the bug. Sampling still runs on the GPU; only
+the VAE decode moves to CPU, costing roughly 30s per clip.
 
 Open http://127.0.0.1:8188, then **Workflow -> Browse Templates -> Video**, and pick
 **LTXV Text to Video**. Before running it:
 
-- Set the **CLIPLoader** node's model to `t5xxl_fp8_e4m3fn.safetensors` (the template
-  defaults to the fp16 file, which you did not download).
+- Leave the **CLIPLoader** node on `t5xxl_fp16.safetensors` (see the fp8 warning above).
 - If it runs out of memory, lower **EmptyLTXVLatentVideo**'s width/height/length
   (768x512x97 is the default; 512x320x65 is a safer starting point).
 
@@ -188,6 +205,15 @@ ComfyUI serves a cached result when the workflow graph is unchanged. The app ran
 `seed`/`noise_seed` inputs to prevent this, so if you still see it, your sampler names its
 seed input something else — rename it or add it to `_SEED_INPUT_NAMES` in
 `backend/src/services/video_providers/comfyui_provider.py`.
+
+**The generated video is blank / uniform grey**
+You started ComfyUI without `--cpu-vae`. Metal's `conv3d` returns all zeros, so the VAE
+decodes nothing while ComfyUI still reports success — see step 3 above for the one-line
+check. A suspiciously tiny output file (~14KB for a few seconds, versus ~100KB+ for real
+content) is the tell: blank frames compress to almost nothing.
+
+Note the sampler is *not* at fault here. If you dump the latent with a `SaveLatent` node it
+will look healthy (no NaNs, std ≈ 0.9) — only the decode is broken.
 
 **Video generation times out**
 Default budget is 900s. Either lower the workflow's resolution/frame count, or raise
