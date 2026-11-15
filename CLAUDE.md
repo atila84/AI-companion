@@ -23,8 +23,8 @@ Read these first — they are the source of truth for what to build and why:
     writing `closes S1.1.1` in the commit rather than editing the file.
   - `python3 scripts/tasks.py set <id> <STATUS>` for anything the hook won't infer
     (`BLOCKED`, `DEFERRED`, or correcting a mistake). It rewrites exactly one line.
-  - Don't reference a story id in a commit that isn't about it — that advances it. Use a
-    `docs:`/`chore:` prefix or `[no-story]`.
+  - Only the commit **subject** advances `TODO` → `WIP`; ids discussed in the body are
+    ignored. `closes <id>` works anywhere.
   - Commit messages must reference the story id, e.g. `feat: add Postgres (S1.1.1)`. The
     `commit-msg` hook rejects messages without one; `docs:`/`chore:` and `[no-story]` are
     the exemptions.

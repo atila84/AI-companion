@@ -70,8 +70,9 @@ Nothing updates the backlog by itself. These make it cheap to keep honest:
 `tasks.md` is **staged, not amended**, so it rides along with your next commit; amending from
 a hook rewrites history and breaks rebases.
 
-The flip side: mentioning a story id in an unrelated commit will advance it. Use a
-`docs:`/`chore:` prefix or `[no-story]` when you are not actually working on it.
+Only the **subject line** counts for `TODO` → `WIP`; commit bodies routinely discuss ids
+as prose, and that must not advance anything. `closes <id>` counts anywhere, since it is
+explicit.
 
 `DONE` is the one thing left to you, deliberately — no tool can know you consider work
 finished, and a false `DONE` is worse than a stale `TODO`.

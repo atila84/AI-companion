@@ -212,8 +212,9 @@ def advance_from_message(message: str, path: Path = TASKS_PATH) -> list[tuple[st
 
     Two rules, both deliberately conservative:
 
-    - A story referenced at all moves `TODO` -> `WIP`. Committing against a
-      story is unambiguous evidence that work started.
+    - A story referenced **in the subject line** moves `TODO` -> `WIP`.
+      Committing against a story is unambiguous evidence work started, but a
+      mention in the body is usually prose about the story, not work on it.
     - A story moves to `DONE` only when the message says so explicitly
       ("closes S1.1.1", "fixes S1.1.1"). Finishing is a judgement no tool can
       make, and a false `DONE` is worse than a stale `TODO`.
@@ -234,8 +235,12 @@ def advance_from_message(message: str, path: Path = TASKS_PATH) -> list[tuple[st
         return []
 
     by_id = {s.id.upper(): s for s in stories}
+    # Closing is explicit, so it counts anywhere in the message. A bare mention
+    # only counts in the subject line: commit bodies routinely *discuss* ids
+    # ("the test hardcoded S1.1.1"), and that must not advance anything.
+    subject = message.strip().splitlines()[0] if message.strip() else ""
     closed = {m.group("id").upper() for m in CLOSE_PATTERN.finditer(message)}
-    referenced = {r.upper() for r in STORY_PATTERN.findall(message)}
+    referenced = {r.upper() for r in STORY_PATTERN.findall(subject)} | closed
 
     changes: list[tuple[str, str, str]] = []
     for story_id in sorted(referenced):

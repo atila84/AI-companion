@@ -277,3 +277,35 @@ def test_validate_reports_a_row_it_cannot_parse(tmp_path: Path) -> None:
     problems = tasks.validate(path=copy)
 
     assert any("did not parse" in p for p in problems), problems
+
+
+def test_body_only_mention_does_not_advance(backlog_copy: Path) -> None:
+    """Regression, found by dogfooding: a commit explaining *why* a test
+    referenced S1.1.1 advanced it to WIP. Commit bodies discuss ids as prose."""
+    story_id = _a_todo(backlog_copy)
+
+    changes = tasks.advance_from_message(
+        f"chore: tooling\n\nthe test hardcoded {story_id} as TODO, which broke", path=backlog_copy
+    )
+
+    assert changes == []
+    assert _status(backlog_copy, story_id) == "TODO"
+
+
+def test_subject_mention_still_advances(backlog_copy: Path) -> None:
+    story_id = _a_todo(backlog_copy)
+
+    changes = tasks.advance_from_message(
+        f"feat: add thing ({story_id})\n\nsome body text", path=backlog_copy
+    )
+
+    assert changes == [(story_id, "TODO", "WIP")]
+
+
+def test_close_in_body_still_closes(backlog_copy: Path) -> None:
+    """Closing is explicit, so it counts anywhere — that's the conventional place."""
+    story_id = _a_todo(backlog_copy)
+
+    changes = tasks.advance_from_message(f"feat: finish it\n\ncloses {story_id}", path=backlog_copy)
+
+    assert changes == [(story_id, "TODO", "DONE")]
