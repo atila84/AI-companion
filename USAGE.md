@@ -109,6 +109,28 @@ check.
 The app does **not** need restarting after the database comes back — pooled
 connections are revalidated before use.
 
+### Migrations
+
+Schema changes are versioned with Alembic. Run from `backend/` with the venv active.
+
+```bash
+alembic upgrade head                          # apply everything (do this after a pull)
+alembic revision --autogenerate -m "add users"  # generate from model changes
+alembic downgrade -1                          # undo the last revision
+alembic current                               # what's applied
+alembic check                                 # do the models and the database agree?
+```
+
+The URL is **not** in `alembic.ini` — `migrations/env.py` reads it from `Settings`,
+so there is one source of truth and no credentials in a checked-in file.
+
+**Always read a generated migration before applying it.** Autogenerate is a
+starting point: it misses renames (it sees a drop plus an add, which loses the
+data) and cannot infer data backfills.
+
+A new model is invisible to autogenerate until it both subclasses `Base` from
+`src/db.py` *and* its module is imported in `migrations/env.py`.
+
 ## Running tests
 
 ```bash
@@ -288,3 +310,14 @@ restart needed.
 
 **`/health` returns 503 with "database ... does not exist"**
 Postgres is running but the database wasn't created: `createdb ai_companion`.
+
+**`alembic` says "Target database is not up to date"**
+Someone added a revision since you last ran it. `alembic upgrade head`.
+
+**Autogenerate produced an empty migration when you changed a model**
+The model's module isn't imported in `migrations/env.py`, so `Base.metadata`
+never saw it. Import it there and regenerate.
+
+**Autogenerate wants to drop and recreate a column you renamed**
+Expected — it compares states and cannot see intent. Hand-edit the revision to
+use `op.alter_column(..., new_column_name=...)`, or the data is lost.
