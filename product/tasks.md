@@ -44,7 +44,7 @@ billing, age verification.
 | id | Story | Status |
 |---|---|---|
 | S1.1.1 | As a developer, I have Postgres running locally and in deploy, so data can persist | `DONE` |
-| S1.1.2 | As a developer, I have a migration tool wired up, so schema changes are versioned | `TODO` |
+| S1.1.2 | As a developer, I have a migration tool wired up, so schema changes are versioned | `DONE` |
 | S1.1.3 | As a developer, I have a `repositories/` layer, so services never touch SQL directly | `TODO` |
 
 **S1.1.1 tasks**
