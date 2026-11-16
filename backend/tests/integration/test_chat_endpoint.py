@@ -53,6 +53,9 @@ def app_module():
     import os
 
     os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    os.environ.setdefault(
+        "DATABASE_URL", "postgresql+asyncpg://localhost/ai_companion"
+    )
     from src.main import app
 
     return app

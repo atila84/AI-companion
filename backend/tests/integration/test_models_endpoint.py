@@ -18,6 +18,9 @@ from src.config import Settings, get_settings
 def app_module():
     """Import the app fresh per test with ANTHROPIC_API_KEY guaranteed set."""
     os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    os.environ.setdefault(
+        "DATABASE_URL", "postgresql+asyncpg://localhost/ai_companion"
+    )
     from src.main import app
 
     return app

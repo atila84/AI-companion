@@ -1,0 +1,33 @@
+# Deployment topology for the single VPS described in SPEC.md §2.
+#
+# Local development on macOS uses Homebrew Postgres instead (see USAGE.md) —
+# Docker Desktop is heavy on a laptop that also runs local video generation.
+# This file is what runs in deploy, and what anyone with Docker can use to get
+# a database without installing Postgres.
+#
+#   docker compose up -d db     # just Postgres, for local development
+#   docker compose up -d        # the full stack
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_companion}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+    ports:
+      # Bound to localhost: the database must never be reachable from the
+      # public internet on a single-VPS deployment.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Other services wait on this, so they never start against a database
+      # that is still initialising.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai_companion}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

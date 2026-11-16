@@ -51,6 +51,16 @@ check_port 5173 frontend
   exit 1
 }
 
+# DATABASE_URL is required (S1.1.1) -- the backend refuses to start without it,
+# so catch it here with instructions rather than a Pydantic traceback.
+if ! grep -q "^DATABASE_URL=" "$BACKEND_DIR/.env"; then
+  echo "ERROR: backend/.env has no DATABASE_URL." >&2
+  echo "  Add this line (Homebrew Postgres, the documented local setup):" >&2
+  echo "    DATABASE_URL=postgresql+asyncpg://localhost/ai_companion" >&2
+  echo "  See USAGE.md 'Database' for installing and starting Postgres." >&2
+  exit 1
+fi
+
 if grep -q "sk-ant-your-key-here" "$BACKEND_DIR/.env"; then
   echo "WARNING: backend/.env still has the placeholder ANTHROPIC_API_KEY." >&2
   echo "  Chat requests will fail with 401 until you set a real key and restart." >&2

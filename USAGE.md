@@ -55,6 +55,60 @@ npm run dev
 
 Either way: open **http://localhost:5173**, type a message, hit Send.
 
+## Database
+
+The backend requires Postgres and **refuses to start without a valid
+`DATABASE_URL`** — a missing or malformed one is a configuration error, caught at
+startup rather than on the first query.
+
+### macOS (Homebrew) — the local setup
+
+```bash
+brew install postgresql@17
+brew services start postgresql@17
+createdb ai_companion
+```
+
+### With Docker instead
+
+```bash
+POSTGRES_PASSWORD=devpassword docker compose up -d db
+```
+
+Then use `postgresql+asyncpg://postgres:devpassword@localhost/ai_companion`.
+`docker-compose.yml` is also the deployment topology (`SPEC.md` §2); it binds
+Postgres to `127.0.0.1` so it is never reachable from the internet.
+
+### Point the app at it
+
+Add to `backend/.env`:
+
+```
+DATABASE_URL=postgresql+asyncpg://localhost/ai_companion
+```
+
+**The `+asyncpg` matters.** A plain `postgresql://` URL — what `psql` and most
+tools print — cannot be used by the async engine, so it is rejected at startup
+with a message telling you to change the scheme. Better than failing on the
+first query under load.
+
+Optional, with sensible defaults: `DATABASE_POOL_SIZE` (5),
+`DATABASE_MAX_OVERFLOW` (10), `DATABASE_POOL_TIMEOUT_SECONDS` (30).
+
+### Check it
+
+```bash
+curl -s localhost:8000/health
+```
+
+`{"status":"ok","database":{"ok":true,"detail":null}}` and HTTP 200 when the
+database is reachable; HTTP **503** with `"status":"degraded"` and the driver's
+error in `detail` when it is not. The status code alone is enough for an uptime
+check.
+
+The app does **not** need restarting after the database comes back — pooled
+connections are revalidated before use.
+
 ## Running tests
 
 ```bash
@@ -218,3 +272,19 @@ will look healthy (no NaNs, std ≈ 0.9) — only the decode is broken.
 **Video generation times out**
 Default budget is 900s. Either lower the workflow's resolution/frame count, or raise
 `COMFYUI_TIMEOUT_SECONDS` in `backend/.env`.
+
+**Backend won't start: `DATABASE_URL must use the async driver`**
+Your URL starts with `postgresql://` or `postgres://`. The async engine needs
+`postgresql+asyncpg://`. Change the scheme in `backend/.env` and restart.
+
+**Backend won't start: `Field required [type=missing]` for `database_url`**
+`backend/.env` has no `DATABASE_URL` line. See "Database" above. `./dev.sh`
+checks for this before starting anything.
+
+**`/health` returns 503 with "Connection refused"**
+Postgres isn't running. `brew services start postgresql@17`, or
+`docker compose up -d db`. The app recovers on its own once it's back — no
+restart needed.
+
+**`/health` returns 503 with "database ... does not exist"**
+Postgres is running but the database wasn't created: `createdb ai_companion`.

@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.services.image_providers.registry import ImageProviderId
@@ -317,6 +317,16 @@ class Settings(BaseSettings):
             and `ChatService`).
         video_model_catalog: The full set of selectable video-generation
             (provider, model) pairs.
+        database_url: Postgres connection URL. Required — there is no default,
+            so construction fails if it is unset, exactly like
+            `anthropic_api_key`. Must use the `postgresql+asyncpg://` driver;
+            a sync URL is rejected at startup rather than failing on the first
+            query.
+        database_pool_size: Connections kept open in the pool.
+        database_max_overflow: Extra connections allowed above `pool_size`
+            under load, closed again when returned.
+        database_pool_timeout_seconds: How long to wait for a free connection
+            before raising, rather than hanging the request indefinitely.
         cors_allow_origins: Origins allowed to call this API from a browser.
             Defaults to the local Vite dev server.
     """
@@ -342,9 +352,47 @@ class Settings(BaseSettings):
     default_video_model_id: str = "comfyui/ltx-video"
     video_model_catalog: list[VideoCatalogEntry] = Field(default_factory=_default_video_catalog)
 
+    database_url: str
+    database_pool_size: int = Field(default=5, gt=0)
+    database_max_overflow: int = Field(default=10, ge=0)
+    database_pool_timeout_seconds: int = Field(default=30, gt=0)
+
     cors_allow_origins: list[str] = ["http://localhost:5173"]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @field_validator("database_url")
+    @classmethod
+    def _require_async_driver(cls, value: str) -> str:
+        """Reject a database URL the async engine cannot use.
+
+        A `postgresql://` URL is the easy mistake — it is what every tool
+        prints — and it fails deep inside the driver on the first query. Catch
+        it at construction, where the message can say what to do.
+
+        Args:
+            value: The configured URL.
+
+        Returns:
+            The URL unchanged.
+
+        Raises:
+            ValueError: The URL is empty or not a `postgresql+asyncpg://` URL.
+        """
+        if not value.strip():
+            raise ValueError("DATABASE_URL is empty")
+        if value.startswith("postgresql+asyncpg://"):
+            return value
+        if value.startswith(("postgresql://", "postgres://")):
+            raise ValueError(
+                "DATABASE_URL must use the async driver: change the scheme to "
+                "'postgresql+asyncpg://' (got "
+                f"'{value.split('://', 1)[0]}://')"
+            )
+        raise ValueError(
+            "DATABASE_URL must be a Postgres URL starting with 'postgresql+asyncpg://' "
+            f"(got '{value[:30]}')"
+        )
 
     def _has_credentials(self, provider_id: ProviderId) -> bool:
         """Whether the given provider has what it needs to be called."""
